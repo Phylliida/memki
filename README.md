@@ -27,10 +27,11 @@ export back to `.apkg`.
 | Browser study UI (`web/`) | ✅ study (keyboard shortcuts, audio/video, note-type CSS, **undo**) |
 | Browse / edit / delete + deck management | ✅ search, edit notes, deck tree (add/rename/delete) |
 | Note-type / template editor | ✅ fields (add/remove/rename), templates, CSS, with note/card migration |
+| Filtered decks + custom study | ✅ build/empty (odid/odue), review-ahead / all / search presets |
+| Image occlusion | ✅ self-contained editor (rectangle masks, hide-one-guess-one) |
 | Statistics | ✅ counts, retention, review history + due forecast |
 
-Not implemented (by request): AnkiWeb sync, FSRS optimizer, add-ons, TTS. Other
-known simplifications: filtered/custom-study decks, image occlusion.
+Not implemented (by request): AnkiWeb sync, FSRS optimizer, add-ons, TTS.
 
 ## Run the app
 
