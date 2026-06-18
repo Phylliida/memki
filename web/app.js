@@ -77,6 +77,31 @@ function resolveMedia(html) {
   });
 }
 
+// Anki embeds audio/video in fields as [sound:filename]; turn each into a
+// native <audio>/<video> player pointing at the media object URL.
+function resolveSounds(html) {
+  return html.replace(/\[sound:([^\]]+)\]/g, (m, name) => {
+    const file = name.trim();
+    const url = mediaUrl(file);
+    if (!url) return ""; // referenced audio not in the media store — drop it
+    const isVideo = /\.(mp4|webm|mov)$/i.test(file);
+    return isVideo
+      ? `<video controls src="${url}" class="av"></video>`
+      : `<audio controls preload="none" src="${url}" class="av"></audio>`;
+  });
+}
+
+/** Render a field's HTML for display: [sound:] players + media object URLs. */
+function renderField(html) {
+  return resolveMedia(resolveSounds(html));
+}
+
+/** Best-effort autoplay of the first media player in the current face (Anki-like). */
+function autoplayFirstMedia() {
+  const av = view().querySelector("audio, video");
+  if (av) av.play().catch(() => {});
+}
+
 // --- formatting ---
 
 function formatInterval(k) {
@@ -152,9 +177,10 @@ function renderStudy() {
 
   show(
     back,
-    el("div", { class: "card-face", html: resolveMedia(question) }),
+    el("div", { class: "card-face", html: renderField(question) }),
     el("button", { class: "show-answer", onclick: () => showAnswer() }, "Show Answer"),
   );
+  autoplayFirstMedia();
 }
 
 function showAnswer() {
@@ -172,7 +198,7 @@ function showAnswer() {
 
   show(
     el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
-    el("div", { class: "card-face", html: resolveMedia(answer) }),
+    el("div", { class: "card-face", html: renderField(answer) }),
     el("div", { class: "study-controls" },
       ratingBtn("Again", "again", Rating.Again),
       ratingBtn("Hard", "hard", Rating.Hard),
@@ -180,6 +206,7 @@ function showAnswer() {
       ratingBtn("Easy", "easy", Rating.Easy),
     ),
   );
+  autoplayFirstMedia();
 }
 
 async function gradeCard(rating) {

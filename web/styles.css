@@ -89,6 +89,7 @@ button:disabled { opacity: 0.5; cursor: default; }
   text-align: center;
 }
 .card-face img { max-width: 100%; height: auto; }
+.card-face .av { display: block; margin: 14px auto; max-width: 100%; }
 hr#answer { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 
 .study-controls { margin-top: 18px; display: flex; justify-content: center; gap: 10px; }
