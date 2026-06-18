@@ -13,19 +13,24 @@ real Anki collections (`.apkg` / `.colpkg`).
 
 ## Status
 
-Early. Building the core library first.
+A working, local-first Anki: import/create decks, study with FSRS-6 or SM-2, and
+export back to `.apkg`.
 
 | Area | State |
 |---|---|
-| FSRS-6 memory model (`src/fsrs.js`) | ✅ implemented, matches fsrs-rs golden vectors |
-| Formula reference (`docs/FSRS6.md`) | ✅ |
-| Data model (col/notes/cards/revlog/decks/models) | ✅ schema-v11 entities, csum/base91/GUID match rslib |
-| `.apkg` / `.colpkg` import (read real collections) | ✅ reads a real deck; recomputed csum/sfld match Anki |
-| `.apkg` export (write real collections) | ✅ schema-v11; real deck round-trips import→export→import |
-| Scheduler (v3: SM-2 + FSRS card lifecycle) | ✅ matches rslib state-machine vectors; answer-card flow + revlog |
-| Template renderer + due-queue builder | ✅ `{{Field}}`/conditionals/`FrontSide`; per-deck due queue + counts |
-| IndexedDB persistence | ✅ save/load whole collection + incremental card/revlog + media |
-| Browser study UI (`web/`) | ✅ deck list, study with 4 buttons, add card, import/export `.apkg` |
+| FSRS-6 memory model (`src/fsrs.js`) | ✅ matches fsrs-rs golden vectors |
+| Data model (col/notes/cards/revlog/decks/models) | ✅ schema-v11; csum/base91/GUID match rslib |
+| `.apkg` / `.colpkg` import + export | ✅ real deck round-trips import→export→import |
+| Scheduler (v3: SM-2 + FSRS, fuzz, daily limits) | ✅ matches rslib state-machine + fuzz vectors |
+| Template renderer (fields, conditionals, **cloze**, **type-in**, MathJax) | ✅ |
+| IndexedDB persistence | ✅ whole-collection + incremental card/revlog/media |
+| Browser study UI (`web/`) | ✅ study (keyboard shortcuts, audio/video, note-type CSS, **undo**) |
+| Browse / edit / delete + deck management | ✅ search, edit notes, deck tree (add/rename/delete) |
+| Statistics | ✅ counts, retention, review history + due forecast |
+
+Not implemented (by request): AnkiWeb sync, FSRS optimizer, add-ons, TTS. Other
+known simplifications: sibling burying, learn-ahead limit, filtered decks, full
+note-type/template editor, image occlusion.
 
 ## Run the app
 
