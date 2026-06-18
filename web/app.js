@@ -48,11 +48,24 @@ function show(...nodes) {
 
 // --- media ---
 
+// Blob URLs need the right MIME type, especially SVG: browsers won't render an
+// <img> pointing at an SVG blob unless its type is exactly image/svg+xml.
+const MIME = {
+  svg: "image/svg+xml", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+  gif: "image/gif", webp: "image/webp", bmp: "image/bmp", ico: "image/x-icon",
+  mp3: "audio/mpeg", ogg: "audio/ogg", oga: "audio/ogg", wav: "audio/wav",
+  m4a: "audio/mp4", flac: "audio/flac", mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime",
+};
+function mimeFor(name) {
+  const ext = name.slice(name.lastIndexOf(".") + 1).toLowerCase();
+  return MIME[ext] || "application/octet-stream";
+}
+
 function mediaUrl(name) {
   if (!state.mediaUrls.has(name)) {
     const bytes = state.media.get(name);
     if (!bytes) return null;
-    state.mediaUrls.set(name, URL.createObjectURL(new Blob([bytes])));
+    state.mediaUrls.set(name, URL.createObjectURL(new Blob([bytes], { type: mimeFor(name) })));
   }
   return state.mediaUrls.get(name);
 }
