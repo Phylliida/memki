@@ -14,6 +14,7 @@
     "./fsrs": "./src/fsrs.js",
     "./model": "./src/model.js",
     "./scheduler": "./src/scheduler.js",
+    "./storage": "./src/storage.js",
     "./apkg": "./src/apkg.js",
     "./sqljs-node": "./src/sqljs-node.js"
   },
@@ -28,5 +29,8 @@
     "fflate": "^0.8.3",
     "fzstd": "^0.1.1",
     "sql.js": "^1.14.1"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5"
   }
 }

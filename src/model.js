@@ -310,11 +310,26 @@ export class Collection {
     return col;
   }
 
+  /**
+   * A unique, strictly-increasing millisecond id. Anki derives ids from the
+   * clock but bumps forward to avoid collisions when creating many at once.
+   */
+  nextId() {
+    this._lastId = Math.max((this._lastId ?? 0) + 1, nowMs());
+    return this._lastId;
+  }
+
+  /** Add a note, assigning a fresh unique id if it's missing or already taken. */
   addNote(note) {
+    if (note.id == null || this.notes.has(note.id)) note.id = this.nextId();
+    else this._lastId = Math.max(this._lastId ?? 0, note.id);
     this.notes.set(note.id, note);
     return note;
   }
+  /** Add a card, assigning a fresh unique id if it's missing or already taken. */
   addCard(card) {
+    if (card.id == null || this.cards.has(card.id)) card.id = this.nextId();
+    else this._lastId = Math.max(this._lastId ?? 0, card.id);
     this.cards.set(card.id, card);
     return card;
   }
