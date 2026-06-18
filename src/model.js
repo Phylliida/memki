@@ -359,6 +359,57 @@ export class Collection {
     return [...this.cards.values()].filter((c) => c.nid === noteId);
   }
 
+  /** Create a deck (name may contain "::" for subdecks). Returns the deck. */
+  addDeck(name) {
+    const existing = Object.values(this.decks).find((d) => d.name === name);
+    if (existing) return existing;
+    const id = this.nextId();
+    this.decks[String(id)] = defaultDeck(id, name);
+    return this.decks[String(id)];
+  }
+
+  /** Rename a deck, carrying its subdecks along (prefix rewrite). */
+  renameDeck(id, newName) {
+    const deck = this.decks[String(id)];
+    if (!deck) return;
+    const prefix = `${deck.name}::`;
+    for (const d of Object.values(this.decks)) {
+      if (d.id === id) d.name = newName;
+      else if (d.name.startsWith(prefix)) d.name = newName + "::" + d.name.slice(prefix.length);
+    }
+  }
+
+  /**
+   * Delete a deck and its subdecks, along with their cards (and any notes left
+   * with no cards). Records graves. The Default deck (id 1) is not deletable.
+   */
+  removeDeck(id) {
+    const deck = this.decks[String(id)];
+    if (!deck || Number(id) === 1) return;
+    const prefix = `${deck.name}::`;
+    const ids = new Set([Number(id)]);
+    for (const d of Object.values(this.decks)) if (d.name.startsWith(prefix)) ids.add(d.id);
+
+    const affectedNotes = new Set();
+    for (const c of [...this.cards.values()]) {
+      if (ids.has(c.did)) {
+        affectedNotes.add(c.nid);
+        this.cards.delete(c.id);
+        this.graves.push({ usn: -1, oid: c.id, type: 0 });
+      }
+    }
+    for (const nid of affectedNotes) {
+      if (this.cardsForNote(nid).length === 0) {
+        this.notes.delete(nid);
+        this.graves.push({ usn: -1, oid: nid, type: 1 });
+      }
+    }
+    for (const did of ids) {
+      delete this.decks[String(did)];
+      this.graves.push({ usn: -1, oid: did, type: 2 });
+    }
+  }
+
   /** Remove a note and all its cards, recording graves. Returns deleted card ids. */
   removeNote(noteId) {
     const cardIds = this.cardsForNote(noteId).map((c) => c.id);

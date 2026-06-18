@@ -109,6 +109,36 @@ test("removeNote deletes the note + its cards and records graves", () => {
   assert.equal(col.graves.filter((g) => g.type === 1).length, 1);
 });
 
+test("deck management: add, rename (with subdecks), delete (with cards)", () => {
+  const col = Collection.createDefault();
+  const mid = Object.values(col.models).find((m) => m.name === "Basic").id;
+
+  const parent = col.addDeck("Spanish");
+  const child = col.addDeck("Spanish::Verbs");
+  assert.equal(col.addDeck("Spanish").id, parent.id); // idempotent by name
+
+  // Rename carries the subdeck.
+  col.renameDeck(parent.id, "Español");
+  assert.equal(col.decks[String(parent.id)].name, "Español");
+  assert.equal(col.decks[String(child.id)].name, "Español::Verbs");
+
+  // A card in the subdeck.
+  const note = new Note({ mid, fields: ["hablar", "to speak"] }).normalize();
+  col.addNote(note);
+  col.addCard(new Card({ nid: note.id, did: child.id }));
+
+  // Delete the parent → subdeck + its card + the orphaned note all go.
+  col.removeDeck(parent.id);
+  assert.equal(col.decks[String(parent.id)], undefined);
+  assert.equal(col.decks[String(child.id)], undefined);
+  assert.equal(col.cards.size, 0);
+  assert.equal(col.notes.size, 0);
+
+  // Default is protected.
+  col.removeDeck(1);
+  assert.ok(col.decks["1"]);
+});
+
 test("Revlog row round-trips in column order", () => {
   const r = new Revlog({ id: 1700000000000, cid: 42, ease: 3, ivl: 4, lastIvl: 1, factor: 2500, time: 1234, type: 0 });
   assert.deepEqual(Revlog.fromRow(r.toRow()), r);

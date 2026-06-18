@@ -59,6 +59,12 @@ button:hover { border-color: var(--accent); }
 button:disabled { opacity: 0.5; cursor: default; }
 
 /* Deck list */
+.decks-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.decks-head h2 { margin: 0; }
+.deck-actions { display: flex; gap: 4px; opacity: 0; transition: opacity 0.1s; }
+.deck:hover .deck-actions { opacity: 1; }
+button.icon { padding: 4px 8px; font-size: 13px; background: transparent; border-color: transparent; }
+button.icon:hover { border-color: var(--border); }
 .deck {
   display: flex;
   align-items: center;

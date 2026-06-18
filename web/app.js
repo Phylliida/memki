@@ -162,6 +162,30 @@ function formatInterval(k) {
 
 // --- views ---
 
+async function persistAll() {
+  await saveCollection(state.db, state.col);
+}
+
+function addDeckPrompt() {
+  const name = prompt("New deck name (use :: for subdecks):");
+  if (!name || !name.trim()) return;
+  state.col.addDeck(name.trim());
+  persistAll().then(renderDecks);
+}
+
+function renameDeckPrompt(deck) {
+  const name = prompt("Rename deck:", deck.name);
+  if (!name || !name.trim() || name === deck.name) return;
+  state.col.renameDeck(deck.id, name.trim());
+  persistAll().then(renderDecks);
+}
+
+function deleteDeckPrompt(deck) {
+  if (!confirm(`Delete "${deck.name}" and all its cards (including subdecks)?`)) return;
+  state.col.removeDeck(deck.id);
+  persistAll().then(renderDecks);
+}
+
 function renderDecks() {
   state.deckId = null;
   state.card = null;
@@ -169,15 +193,24 @@ function renderDecks() {
   const decks = Object.values(state.col.decks).sort((a, b) => a.name.localeCompare(b.name));
   const rows = decks.map((d) => {
     const c = sched.counts(d.id);
-    return el("div", { class: "deck", onclick: () => startStudy(d.id) },
-      el("span", { class: "name" }, d.name),
+    const depth = d.name.split("::").length - 1;
+    const leaf = d.name.split("::").pop();
+    const actions = el("span", { class: "deck-actions" },
+      el("button", { class: "icon", title: "Rename", onclick: (e) => { e.stopPropagation(); renameDeckPrompt(d); } }, "✎"),
+      Number(d.id) === 1 ? "" :
+        el("button", { class: "icon", title: "Delete", onclick: (e) => { e.stopPropagation(); deleteDeckPrompt(d); } }, "🗑"),
+    );
+    const row = el("div", { class: "deck", onclick: () => startStudy(d.id) },
+      el("span", { class: "name", style: `padding-left:${depth * 18}px` }, leaf),
       el("span", { class: "count new", title: "new" }, c.new),
       el("span", { class: "count learning", title: "learning" }, c.learning),
       el("span", { class: "count review", title: "review" }, c.review),
+      actions,
     );
+    return row;
   });
   show(
-    el("h2", {}, "Decks"),
+    el("div", { class: "decks-head" }, el("h2", {}, "Decks"), el("button", { onclick: addDeckPrompt }, "+ Deck")),
     ...rows,
     rows.length ? "" : el("p", { class: "center" }, "No decks yet. Add a card or import an .apkg."),
   );
