@@ -47,7 +47,7 @@ export function decodeEntities(s) {
 }
 
 // Media tags whose src/data filename should survive stripping (img, audio,
-// object, ...). Mirrors the intent of rslib's HTML_MEDIA_TAGS.
+// object, ...). Mirrors rslib's HTML_MEDIA_TAGS.
 const MEDIA_TAG = /<(?:img|audio|video|object|source)\b[^>]*?\b(?:src|data)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^ >]+))[^>]*>/gi;
 const ANY_TAG = /<[^>]+>/g;
 
@@ -56,28 +56,34 @@ export function stripHtml(html) {
   return decodeEntities(html.replace(ANY_TAG, ""));
 }
 
-/** Like stripHtml, but replaces media tags with their src/data filename. */
+/**
+ * Like stripHtml, but replaces media tags with their src/data filename
+ * SURROUNDED BY SPACES, exactly as rslib's `r" ${1}${2}${3} "`. The result is
+ * NOT trimmed — those spaces are part of what Anki checksums and stores as sfld.
+ */
 export function stripHtmlPreservingMediaFilenames(html) {
-  const withMedia = html.replace(MEDIA_TAG, (_m, q, a, u) => q ?? a ?? u ?? "");
+  const withMedia = html.replace(MEDIA_TAG, (_m, q, a, u) => ` ${q ?? a ?? u ?? ""} `);
   return decodeEntities(withMedia.replace(ANY_TAG, ""));
 }
 
 /**
- * Anki note checksum: first 4 bytes of SHA-1 of the stripped first field,
- * as a big-endian unsigned 32-bit integer.
+ * Anki note checksum: first 4 bytes of SHA-1 of the NFC-normalized, stripped
+ * first field, as a big-endian unsigned 32-bit integer. Anki normalizes fields
+ * to NFC before checksumming, so we do too.
  * @param {string} field0 The first field's raw (HTML) value.
  * @returns {number} unsigned 32-bit checksum
  */
 export function fieldChecksum(field0) {
-  const d = sha1Bytes(stripHtmlPreservingMediaFilenames(field0));
+  const d = sha1Bytes(stripHtmlPreservingMediaFilenames(field0.normalize("NFC")));
   return ((d[0] << 24) | (d[1] << 16) | (d[2] << 8) | d[3]) >>> 0;
 }
 
 /**
- * The sort field value: stripped text of the field at `sortIdx` (default 0).
+ * The sort field value: NFC-normalized, media-preserving-stripped text of the
+ * field at `sortIdx` (default 0). Matches Anki's stored sfld byte-for-byte.
  * @param {string[]} fields
  * @param {number} [sortIdx]
  */
 export function sortField(fields, sortIdx = 0) {
-  return stripHtmlPreservingMediaFilenames(fields[sortIdx] ?? "");
+  return stripHtmlPreservingMediaFilenames((fields[sortIdx] ?? "").normalize("NFC"));
 }

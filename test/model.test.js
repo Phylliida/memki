@@ -39,13 +39,14 @@ test("fields round-trip through the 0x1f separator", () => {
 test("strip_html and media-preserving variant", () => {
   assert.equal(stripHtml("t<b>e</b>st"), "test");
   assert.equal(stripHtml("a&amp;b&nbsp;c"), "a&b c");
-  assert.equal(stripHtmlPreservingMediaFilenames('<img src="cat.jpg">'), "cat.jpg");
+  // rslib surrounds the preserved filename with spaces (untrimmed).
+  assert.equal(stripHtmlPreservingMediaFilenames('<img src="cat.jpg">'), " cat.jpg ");
   assert.equal(stripHtmlPreservingMediaFilenames("plain text"), "plain text");
 });
 
-test("csum uses the media-preserving strip (filename survives)", () => {
-  // Field with an <img> should checksum the same as its bare filename.
-  assert.equal(fieldChecksum('<img src="test">'), fieldChecksum("test"));
+test("csum uses the media-preserving strip (filename survives, space-padded)", () => {
+  // <img src="test"> strips to " test " (with spaces), per Anki.
+  assert.equal(fieldChecksum('<img src="test">'), fieldChecksum(" test "));
 });
 
 test("tags join/split match Anki's space-padded format", () => {

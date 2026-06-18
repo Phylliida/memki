@@ -11,7 +11,10 @@
   },
   "exports": {
     ".": "./src/index.js",
-    "./fsrs": "./src/fsrs.js"
+    "./fsrs": "./src/fsrs.js",
+    "./model": "./src/model.js",
+    "./apkg": "./src/apkg.js",
+    "./sqljs-node": "./src/sqljs-node.js"
   },
   "scripts": {
     "test": "node --test"
@@ -19,6 +22,10 @@
   "files": [
     "src"
   ],
-  "comment": "The core (fsrs, sm2, model) has ZERO runtime dependencies. Interop (.apkg/.colpkg read/write) will add sql.js, fflate, and fzstd as optional deps once those modules land.",
-  "optionalDependencies": {}
+  "comment": "Core (index/fsrs/model/text/ids/sha1) is dependency-free by import graph; only the ./apkg interop module imports sql.js, fflate, and fzstd.",
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "fzstd": "^0.1.1",
+    "sql.js": "^1.14.1"
+  }
 }
