@@ -19,8 +19,8 @@ Early. Building the core library first.
 |---|---|
 | FSRS-6 memory model (`src/fsrs.js`) | ✅ implemented, matches fsrs-rs golden vectors |
 | Formula reference (`docs/FSRS6.md`) | ✅ |
+| Data model (col/notes/cards/revlog/decks/models) | ✅ schema-v11 entities, csum/base91/GUID match rslib |
 | Legacy SM-2 / v3 scheduler | ⬜ planned |
-| Data model (col/notes/cards/revlog/decks/models) | ⬜ planned |
 | `.apkg` / `.colpkg` import (read real collections) | ⬜ planned |
 | `.apkg` / `.colpkg` export (write real collections) | ⬜ planned |
 | IndexedDB persistence | ⬜ planned |
