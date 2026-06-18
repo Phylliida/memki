@@ -445,6 +445,70 @@ export class Scheduler {
     }
   }
 
+  /** Deck ids belonging to `deckId`: the deck itself plus its descendants. */
+  _deckAndDescendants(deckId) {
+    const deck = this.col.decks[String(deckId)];
+    const ids = new Set([Number(deckId)]);
+    if (deck) {
+      const prefix = `${deck.name}::`;
+      for (const [id, d] of Object.entries(this.col.decks)) {
+        if (d.name && d.name.startsWith(prefix)) ids.add(Number(id));
+      }
+    }
+    return ids;
+  }
+
+  /**
+   * Gather the cards due now in a deck (and its subdecks), grouped and capped at
+   * the deck's per-day new/review limits. Simplified vs Anki: it does not
+   * subtract cards already studied earlier today, and uses a fixed study order
+   * (due learning, then reviews, then new).
+   * @returns {{ learning: Card[], review: Card[], new: Card[], all: Card[] }}
+   */
+  queue(deckId, { now } = {}) {
+    const nowS = now ?? this.now;
+    const dids = this._deckAndDescendants(deckId);
+    const learning = [], review = [], newCards = [];
+    for (const card of this.col.cards.values()) {
+      if (!dids.has(card.did)) continue;
+      switch (card.queue) {
+        case CardQueue.Learning:
+          if (card.due <= nowS) learning.push(card);
+          break;
+        case CardQueue.DayLearning:
+          if (card.due <= this.daysElapsed) learning.push(card);
+          break;
+        case CardQueue.Review:
+          if (card.due <= this.daysElapsed) review.push(card);
+          break;
+        case CardQueue.New:
+          newCards.push(card);
+          break;
+        // suspended / buried / preview: not studied here
+      }
+    }
+    const byDue = (a, b) => a.due - b.due;
+    learning.sort(byDue);
+    review.sort(byDue);
+    newCards.sort(byDue);
+
+    const dc = this.deckConfigFor({ did: deckId });
+    const newPerDay = dc.new?.perDay ?? 20;
+    const revPerDay = dc.rev?.perDay ?? 200;
+    const cappedReview = review.slice(0, revPerDay);
+    const cappedNew = newCards.slice(0, newPerDay);
+    return {
+      learning, review: cappedReview, new: cappedNew,
+      all: [...learning, ...cappedReview, ...cappedNew],
+    };
+  }
+
+  /** Due counts for a deck (and subdecks): { new, learning, review }. */
+  counts(deckId, opts) {
+    const q = this.queue(deckId, opts);
+    return { new: q.new.length, learning: q.learning.length, review: q.review.length };
+  }
+
   /** Preview the four button outcomes for a card without mutating it. */
   nextStates(card) {
     const current = this.cardToState(card);

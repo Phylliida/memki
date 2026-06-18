@@ -14,6 +14,7 @@
     "./fsrs": "./src/fsrs.js",
     "./model": "./src/model.js",
     "./scheduler": "./src/scheduler.js",
+    "./template": "./src/template.js",
     "./storage": "./src/storage.js",
     "./apkg": "./src/apkg.js",
     "./sqljs-node": "./src/sqljs-node.js"
