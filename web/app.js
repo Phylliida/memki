@@ -5,6 +5,7 @@
 import { Collection, Note, Card, NoteTypeKind } from "../src/model.js";
 import { Scheduler } from "../src/scheduler.js";
 import { renderCard, clozeNumbers } from "../src/template.js";
+import { collectionStats } from "../src/stats.js";
 import { Rating } from "../src/fsrs.js";
 import { stripHtml } from "../src/text.js";
 import {
@@ -464,6 +465,47 @@ function renderEditNote(noteId) {
   );
 }
 
+// --- stats ---
+
+function barChart(values, color, height = 90) {
+  const max = Math.max(1, ...values);
+  return el("div", { class: "chart", style: `height:${height}px` },
+    ...values.map((v) => el("div", {
+      class: "bar", title: String(v), style: `height:${(v / max) * 100}%; background:${color}`,
+    })),
+  );
+}
+
+function renderStats() {
+  state.card = null;
+  const today = Math.floor((Math.floor(Date.now() / 1000) - (state.col.crt ?? 0)) / 86400);
+  const s = collectionStats(state.col, today, 30);
+  const c = s.counts;
+  const stat = (label, value, cls = "") => el("div", { class: `stat ${cls}` },
+    el("div", { class: "stat-n" }, value), el("div", { class: "stat-l" }, label));
+
+  show(
+    el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
+    el("h2", {}, "Statistics"),
+    el("div", { class: "stat-grid" },
+      stat("New", c.new, "new"),
+      stat("Learning", c.learning, "learning"),
+      stat("Young", c.young, "review"),
+      stat("Mature", c.mature, "review"),
+      stat("Suspended", c.suspended, "suspended"),
+      stat("Total", c.total),
+    ),
+    el("p", { class: "muted" },
+      `${s.totalReviews} reviews logged · true retention ` +
+      (s.retention == null ? "—" : `${(s.retention * 100).toFixed(0)}%`)),
+    el("h3", {}, "Reviews — last 30 days"),
+    barChart([...s.reviewsPerDay].reverse(), "var(--good)"), // oldest → today (right)
+    el("h3", {}, "Due — next 30 days"),
+    barChart(s.dueForecast, "var(--accent)"),
+  );
+  setStatus("");
+}
+
 // --- import / export (.apkg) ---
 
 async function loadSql() {
@@ -515,6 +557,7 @@ async function doExport() {
 function wireHeader() {
   document.getElementById("btn-add").addEventListener("click", renderAddCard);
   document.getElementById("btn-browse").addEventListener("click", () => renderBrowse(state.browseQuery ?? ""));
+  document.getElementById("btn-stats").addEventListener("click", renderStats);
   const fileInput = document.getElementById("file-import");
   document.getElementById("btn-import").addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", () => {

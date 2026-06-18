@@ -125,6 +125,19 @@ hr#answer { border: none; border-top: 1px solid #ccc; margin: 20px 0; }
 .crumbs { color: var(--muted); margin-bottom: 16px; font-size: 14px; cursor: pointer; }
 .crumbs:hover { color: var(--text); }
 
+/* Stats */
+.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+.stat { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; text-align: center; }
+.stat-n { font-size: 26px; font-variant-numeric: tabular-nums; }
+.stat-l { color: var(--muted); font-size: 13px; margin-top: 4px; }
+.stat.new .stat-n { color: var(--accent); }
+.stat.learning .stat-n { color: var(--hard); }
+.stat.review .stat-n { color: var(--good); }
+.stat.suspended .stat-n { color: var(--again); }
+.chart { display: flex; align-items: flex-end; gap: 1px; margin: 8px 0 18px; }
+.chart .bar { flex: 1; min-height: 1px; border-radius: 2px 2px 0 0; }
+main h3 { margin: 18px 0 4px; font-size: 15px; color: var(--muted); }
+
 /* Add-card form */
 .form { display: flex; flex-direction: column; gap: 12px; }
 .form-fields { display: flex; flex-direction: column; gap: 12px; }
