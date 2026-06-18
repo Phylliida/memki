@@ -104,10 +104,49 @@ function minMax(ctx, minimum) {
   return [Math.min(Math.max(minimum, 1), maximum), maximum];
 }
 
-/** Apply (currently no) fuzz, round, and clamp. fuzzFactor=null => deterministic. */
+// Interval fuzz (rslib states/fuzz.rs). fuzzFactor in [0,1) picks within the
+// range; null => deterministic round+clamp (used in tests / previews).
+const FUZZ_RANGES = [
+  { start: 2.5, end: 7.0, factor: 0.15 },
+  { start: 7.0, end: 20.0, factor: 0.1 },
+  { start: 20.0, end: Infinity, factor: 0.05 },
+];
+
+function fuzzDelta(interval) {
+  if (interval < 2.5) return 0.0;
+  return FUZZ_RANGES.reduce(
+    (delta, r) => delta + r.factor * Math.max(Math.min(interval, r.end) - r.start, 0.0),
+    1.0,
+  );
+}
+
+function constrainedFuzzBounds(interval, minimum, maximum) {
+  minimum = Math.min(minimum, maximum);
+  interval = Math.min(Math.max(interval, minimum), maximum);
+  const delta = fuzzDelta(interval);
+  let lower = Math.round(interval - delta);
+  let upper = Math.round(interval + delta);
+  lower = Math.min(Math.max(lower, minimum), maximum);
+  upper = Math.min(Math.max(upper, minimum), maximum);
+  if (upper === lower && upper > 2 && upper < maximum) upper = lower + 1;
+  return [lower, upper];
+}
+
 function withReviewFuzz(ctx, interval, minimum, maximum) {
-  // Fuzz intentionally disabled by default for determinism (see file header).
-  return Math.min(Math.max(Math.round(interval), minimum), maximum);
+  if (ctx.fuzzFactor == null) {
+    return Math.min(Math.max(Math.round(interval), minimum), maximum);
+  }
+  const [lower, upper] = constrainedFuzzBounds(interval, minimum, maximum);
+  return Math.floor(lower + ctx.fuzzFactor * (1 + upper - lower));
+}
+
+/** Deterministic fuzz factor in [0,1) from a card's id + reps. */
+function fuzzFactorFor(card) {
+  let x = ((Number(card.id) >>> 0) ^ ((card.reps * 2654435761) >>> 0)) >>> 0;
+  x = ((x ^ (x >>> 15)) * 2246822519) >>> 0;
+  x = ((x ^ (x >>> 13)) * 3266489917) >>> 0;
+  x = (x ^ (x >>> 16)) >>> 0;
+  return x / 4294967296;
 }
 
 function leechThresholdMet(lapses, threshold) {
@@ -360,6 +399,7 @@ export class Scheduler {
   constructor(collection, opts = {}) {
     this.col = collection;
     this.now = opts.now ?? nowSec();
+    this.fuzz = opts.fuzz ?? false; // off by default → deterministic intervals
     this.fsrsEnabled = collection.conf?.fsrs === true;
     this.fsrsParameters = opts.fsrsParameters ?? collection.conf?.fsrsParams6 ?? DEFAULT_PARAMETERS;
     // timing: crt is the rollover anchor (Anki aligns it).
@@ -402,6 +442,7 @@ export class Scheduler {
       minimumLapseInterval: lapse.minInt ?? 1,
       fsrs: null,
       fsrsShortTermWithSteps: false,
+      fuzzFactor: this.fuzz ? fuzzFactorFor(card) : null,
     };
 
     if (this.fsrsEnabled) {
@@ -618,5 +659,6 @@ function stateLeeched(state) {
 // Expose pure transition helpers for testing against rslib's unit vectors.
 export const _internal = {
   LearningSteps, nextStatesFor, reviewNextStates, learnNextStates, relearnNextStates,
-  leechThresholdMet, INITIAL_EASE_FACTOR, MINIMUM_EASE_FACTOR,
+  leechThresholdMet, withReviewFuzz, constrainedFuzzBounds, fuzzDelta,
+  INITIAL_EASE_FACTOR, MINIMUM_EASE_FACTOR,
 };

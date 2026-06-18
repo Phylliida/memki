@@ -10,7 +10,32 @@ import { Scheduler, _internal } from "../src/scheduler.js";
 import { Collection, Note, Card, CardType, CardQueue } from "../src/model.js";
 import { Rating } from "../src/fsrs.js";
 
-const { LearningSteps, reviewNextStates, learnNextStates, relearnNextStates, leechThresholdMet } = _internal;
+const { LearningSteps, reviewNextStates, learnNextStates, relearnNextStates, leechThresholdMet, withReviewFuzz } = _internal;
+
+// rslib states/fuzz.rs golden vectors.
+const fz = (factor, interval, min, max) => withReviewFuzz({ fuzzFactor: factor }, interval, min, max);
+
+test("fuzz: no factor → round+clamp [fuzz.rs]", () => {
+  assert.equal(fz(null, 1.5, 1, 100), 2);
+  assert.equal(fz(null, 0.1, 1, 100), 1);
+  assert.equal(fz(null, 101, 1, 100), 100);
+});
+
+test("fuzz: lower/middle/upper across ranges [fuzz.rs]", () => {
+  const lmu = (interval, min, max, lo, mid, hi) => {
+    assert.equal(fz(0.0, interval, min, max), lo);
+    assert.equal(fz(0.5, interval, min, max), mid);
+    assert.equal(fz(0.99, interval, min, max), hi);
+  };
+  lmu(1.0, 1, 1000, 1, 1, 1);     // no fuzz below 2.5
+  lmu(2.49, 1, 1000, 2, 2, 2);
+  lmu(2.5, 1, 1000, 2, 3, 4);     // +1 day
+  lmu(7.0, 1, 1000, 5, 7, 9);     // +0.15/day in 2.5–7
+  lmu(17.0, 1, 1000, 14, 17, 20); // +0.1/day in 7–20
+  lmu(37.0, 1, 1000, 33, 37, 41); // +0.05/day above 20
+  lmu(100.0, 1, 99, 92, 96, 99);  // respect maximum
+  lmu(100.0, 101, 1000, 101, 105, 108); // respect minimum
+});
 
 // Mirror rslib StateContext::defaults_for_testing().
 function testCtx(over = {}) {

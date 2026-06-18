@@ -189,7 +189,7 @@ function deleteDeckPrompt(deck) {
 function renderDecks() {
   state.deckId = null;
   state.card = null;
-  const sched = new Scheduler(state.col);
+  const sched = new Scheduler(state.col, { fuzz: true });
   const decks = Object.values(state.col.decks).sort((a, b) => a.name.localeCompare(b.name));
   const rows = decks.map((d) => {
     const c = sched.counts(d.id);
@@ -222,7 +222,7 @@ function renderDecks() {
 }
 
 function nextDueCard() {
-  const sched = new Scheduler(state.col);
+  const sched = new Scheduler(state.col, { fuzz: true });
   return sched.queue(state.deckId).all[0] ?? null;
 }
 
@@ -269,7 +269,7 @@ function showAnswer() {
   applyModelCss(noteType);
   const typed = view().querySelector("#typeans")?.value ?? "";
   const { answer } = renderCard(noteType, card.ord, note, { typed });
-  const sched = new Scheduler(state.col);
+  const sched = new Scheduler(state.col, { fuzz: true });
   const outcomes = sched.nextStates(card);
 
   const ratingBtn = (label, cls, rating) =>
@@ -294,7 +294,7 @@ function showAnswer() {
 
 async function gradeCard(rating) {
   const card = state.card;
-  const sched = new Scheduler(state.col);
+  const sched = new Scheduler(state.col, { fuzz: true });
   const entry = sched.answerCard(card, rating);
   await putCard(state.db, card);
   await putRevlog(state.db, entry);
