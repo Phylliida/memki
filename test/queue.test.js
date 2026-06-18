@@ -63,6 +63,37 @@ test("daily new limit tapers as cards are studied today", () => {
   assert.equal(sched.counts(1).new, 0); // daily cap reached
 });
 
+test("answering buries siblings; new-day unbury restores them", () => {
+  const col = collectionWithDeck();
+  const mid = Object.values(col.models).find((m) => m.name === "Basic").id;
+  const note = new Note({ mid, fields: ["Q", "A"] }).normalize();
+  col.addNote(note);
+  const c0 = col.addCard(new Card({ nid: note.id, did: 1, ord: 0, type: CardType.New, queue: CardQueue.New, due: 1 }));
+  const c1 = col.addCard(new Card({ nid: note.id, did: 1, ord: 1, type: CardType.New, queue: CardQueue.New, due: 2 }));
+
+  const sched = new Scheduler(col);
+  sched.answerCard(c0, Rating.Good);
+  assert.equal(c1.queue, CardQueue.SchedBuried); // sibling buried
+
+  // Same-day re-query does not surface the buried sibling.
+  assert.ok(!sched.queue(1).all.some((c) => c.id === c1.id));
+
+  // New-day unbury restores it (idempotent within a day).
+  assert.equal(sched.unburyForNewDay(), 1);
+  assert.equal(c1.queue, CardQueue.New);
+  assert.equal(sched.unburyForNewDay(), 0);
+});
+
+test("learn-ahead surfaces near-due learning cards (after everything else)", () => {
+  const col = collectionWithDeck();
+  col.conf.collapseTime = 1200; // 20 min
+  const ahead = addCard(col, { type: CardType.Learning, queue: CardQueue.Learning, due: nowSec() + 300 });
+  const sched = new Scheduler(col);
+  const q = sched.queue(1);
+  assert.equal(q.learning.length, 0); // not due "now"
+  assert.ok(q.all.some((c) => c.id === ahead.id)); // but reachable via learn-ahead
+});
+
 test("subdeck cards are included when studying the parent", () => {
   const col = collectionWithDeck();
   // Add a child deck "Default::Child".

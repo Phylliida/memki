@@ -300,6 +300,9 @@ async function gradeCard(rating) {
     deckId: state.deckId,
     cardId: card.id,
     card: { ...card },
+    siblings: state.col.cardsForNote(card.nid)
+      .filter((c) => c.id !== card.id)
+      .map((c) => ({ id: c.id, queue: c.queue })),
     deckCounters: Object.fromEntries(
       Object.entries(state.col.decks).map(([id, d]) => [id, { newToday: d.newToday, revToday: d.revToday }]),
     ),
@@ -309,7 +312,8 @@ async function gradeCard(rating) {
   snapshot.entryId = entry.id;
   state.lastAction = snapshot;
   updateUndoButton();
-  await putCard(state.db, card);
+  // Persist the answered card AND its (possibly buried) siblings.
+  for (const c of state.col.cardsForNote(card.nid)) await putCard(state.db, c);
   await putRevlog(state.db, entry);
   await putMeta(state.db, state.col); // persist deck daily counters (newToday/revToday)
   renderStudy();
@@ -325,13 +329,17 @@ async function doUndo() {
   if (!a) return;
   const card = state.col.cards.get(a.cardId);
   if (card) Object.assign(card, a.card); // restore pre-answer card fields
+  for (const s of a.siblings ?? []) {     // un-bury siblings buried by the answer
+    const sib = state.col.cards.get(s.id);
+    if (sib) sib.queue = s.queue;
+  }
   state.col.revlog = state.col.revlog.filter((r) => r.id !== a.entryId);
   for (const [id, counters] of Object.entries(a.deckCounters)) {
     if (state.col.decks[id]) Object.assign(state.col.decks[id], counters);
   }
   state.lastAction = null;
   updateUndoButton();
-  if (card) await putCard(state.db, card);
+  if (card) for (const c of state.col.cardsForNote(card.nid)) await putCard(state.db, c);
   await deleteRevlog(state.db, a.entryId);
   await putMeta(state.db, state.col);
   setStatus("Undone.");
@@ -629,6 +637,10 @@ async function init() {
     await saveCollection(state.db, state.col);
   }
   state.media = await loadMedia(state.db);
+  // New-day maintenance: un-bury yesterday's buried siblings, then persist.
+  if (new Scheduler(state.col).unburyForNewDay() > 0) {
+    await saveCollection(state.db, state.col);
+  }
   wireHeader();
   wireKeyboard();
   renderDecks();

@@ -508,13 +508,15 @@ export class Scheduler {
    */
   queue(deckId, { now } = {}) {
     const nowS = now ?? this.now;
+    const learnAheadSecs = this.col.conf?.collapseTime ?? 1200;
     const dids = this._deckAndDescendants(deckId);
-    const learning = [], review = [], newCards = [];
+    const learning = [], learningAhead = [], review = [], newCards = [];
     for (const card of this.col.cards.values()) {
       if (!dids.has(card.did)) continue;
       switch (card.queue) {
         case CardQueue.Learning:
           if (card.due <= nowS) learning.push(card);
+          else if (card.due <= nowS + learnAheadSecs) learningAhead.push(card); // learn-ahead
           break;
         case CardQueue.DayLearning:
           if (card.due <= this.daysElapsed) learning.push(card);
@@ -530,6 +532,7 @@ export class Scheduler {
     }
     const byDue = (a, b) => a.due - b.due;
     learning.sort(byDue);
+    learningAhead.sort(byDue);
     review.sort(byDue);
     newCards.sort(byDue);
 
@@ -544,8 +547,42 @@ export class Scheduler {
     const cappedReview = review.slice(0, Math.max(0, revPerDay - revDone));
     return {
       learning, review: cappedReview, new: cappedNew,
-      all: [...learning, ...cappedReview, ...cappedNew],
+      // Learn-ahead cards are studied early only once everything else is done.
+      all: [...learning, ...cappedReview, ...cappedNew, ...learningAhead],
     };
+  }
+
+  /**
+   * Un-bury scheduler/user-buried cards once per day (restoring queue from type).
+   * Call this on collection load and persist if it returns > 0. Returns the
+   * number of cards unburied. Idempotent within a day.
+   */
+  unburyForNewDay() {
+    if (this.col.conf._lastUnburyDay === this.daysElapsed) return 0;
+    let changed = 0;
+    for (const card of this.col.cards.values()) {
+      if (card.queue === CardQueue.SchedBuried || card.queue === CardQueue.UserBuried) {
+        card.queue = card.type === CardType.Review ? CardQueue.Review
+          : card.type === CardType.New ? CardQueue.New
+          : CardQueue.Learning;
+        changed++;
+      }
+    }
+    this.col.conf._lastUnburyDay = this.daysElapsed;
+    return changed;
+  }
+
+  /** Bury a card's siblings (same note) per the deck's bury settings. */
+  _burySiblings(card) {
+    const dc = this.deckConfigFor(card);
+    const buryNew = dc.new?.bury ?? true;
+    const buryRev = dc.rev?.bury ?? true;
+    for (const sib of this.col.cards.values()) {
+      if (sib.nid !== card.nid || sib.id === card.id) continue;
+      if ((sib.queue === CardQueue.New && buryNew) || (sib.queue === CardQueue.Review && buryRev)) {
+        sib.queue = CardQueue.SchedBuried;
+      }
+    }
   }
 
   /** Read a deck's [dayStamp, count] counter, treating stale stamps as 0. */
@@ -616,6 +653,7 @@ export class Scheduler {
     }
     card.mod = this.now;
     card.usn = -1;
+    this._burySiblings(card); // hide other cards of the same note until tomorrow
 
     const entry = new Revlog({
       id: opts.nowMs ?? nowMs(),
