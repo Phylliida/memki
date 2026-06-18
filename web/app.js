@@ -10,7 +10,7 @@ import { Rating } from "../src/fsrs.js";
 import { stripHtml } from "../src/text.js";
 import {
   openCollectionDB, loadCollection, saveCollection,
-  putCard, putNote, putRevlog, putMeta, saveMedia, loadMedia, clearAll, deleteNoteAndCards,
+  putCard, putNote, putRevlog, putMeta, saveMedia, loadMedia, clearAll, deleteNoteAndCards, deleteRevlog,
 } from "../src/storage.js";
 
 const SQL_CDN = "https://cdn.jsdelivr.net/npm/sql.js@1.14.1/dist/";
@@ -295,11 +295,47 @@ function showAnswer() {
 
 async function gradeCard(rating) {
   const card = state.card;
+  // Snapshot for single-level undo: the card before mutation + all deck counters.
+  const snapshot = {
+    deckId: state.deckId,
+    cardId: card.id,
+    card: { ...card },
+    deckCounters: Object.fromEntries(
+      Object.entries(state.col.decks).map(([id, d]) => [id, { newToday: d.newToday, revToday: d.revToday }]),
+    ),
+  };
   const sched = new Scheduler(state.col, { fuzz: true });
   const entry = sched.answerCard(card, rating);
+  snapshot.entryId = entry.id;
+  state.lastAction = snapshot;
+  updateUndoButton();
   await putCard(state.db, card);
   await putRevlog(state.db, entry);
   await putMeta(state.db, state.col); // persist deck daily counters (newToday/revToday)
+  renderStudy();
+}
+
+function updateUndoButton() {
+  const btn = document.getElementById("btn-undo");
+  if (btn) btn.disabled = !state.lastAction;
+}
+
+async function doUndo() {
+  const a = state.lastAction;
+  if (!a) return;
+  const card = state.col.cards.get(a.cardId);
+  if (card) Object.assign(card, a.card); // restore pre-answer card fields
+  state.col.revlog = state.col.revlog.filter((r) => r.id !== a.entryId);
+  for (const [id, counters] of Object.entries(a.deckCounters)) {
+    if (state.col.decks[id]) Object.assign(state.col.decks[id], counters);
+  }
+  state.lastAction = null;
+  updateUndoButton();
+  if (card) await putCard(state.db, card);
+  await deleteRevlog(state.db, a.entryId);
+  await putMeta(state.db, state.col);
+  setStatus("Undone.");
+  state.deckId = a.deckId;
   renderStudy();
 }
 
@@ -558,6 +594,7 @@ function wireHeader() {
   document.getElementById("btn-add").addEventListener("click", renderAddCard);
   document.getElementById("btn-browse").addEventListener("click", () => renderBrowse(state.browseQuery ?? ""));
   document.getElementById("btn-stats").addEventListener("click", renderStats);
+  document.getElementById("btn-undo").addEventListener("click", doUndo);
   const fileInput = document.getElementById("file-import");
   document.getElementById("btn-import").addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", () => {
@@ -571,7 +608,8 @@ function wireHeader() {
 function wireKeyboard() {
   const GRADE = { 1: Rating.Again, 2: Rating.Hard, 3: Rating.Good, 4: Rating.Easy, " ": Rating.Good, Enter: Rating.Good };
   document.addEventListener("keydown", (e) => {
-    if (!state.card) return; // only while a card is being studied
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); doUndo(); return; }
+    if (!state.card) return; // grading shortcuts only while a card is being studied
     const inField = e.target?.matches?.("input, textarea, select");
     if (!state.answerShown) {
       if (e.key === "Enter") { e.preventDefault(); showAnswer(); }

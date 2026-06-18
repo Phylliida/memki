@@ -109,6 +109,13 @@ export async function putRevlog(db, entry) {
   await txDone(tx);
 }
 
+/** Delete a single revlog entry (used by undo). */
+export async function deleteRevlog(db, id) {
+  const tx = db.transaction("revlog", "readwrite");
+  tx.objectStore("revlog").delete(id);
+  await txDone(tx);
+}
+
 /** Delete a note and its cards from storage. */
 export async function deleteNoteAndCards(db, noteId, cardIds) {
   const tx = db.transaction(["notes", "cards"], "readwrite");
