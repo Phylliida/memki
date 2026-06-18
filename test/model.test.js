@@ -103,13 +103,13 @@ test("Collection.createDefault has Default deck, options, and Basic note type", 
   assert.ok(col.decks["1"] && col.decks["1"].name === "Default");
   assert.ok(col.dconf["1"] && col.dconf["1"].new.initialFactor === 2500);
   const models = Object.values(col.models);
-  assert.equal(models.length, 1);
-  assert.equal(models[0].name, "Basic");
-  assert.deepEqual(models[0].flds.map((f) => f.name), ["Front", "Back"]);
-  assert.equal(col.conf.curModel, String(models[0].id));
+  assert.deepEqual(models.map((m) => m.name).sort(), ["Basic", "Cloze"]);
+  const basic = models.find((m) => m.name === "Basic");
+  assert.deepEqual(basic.flds.map((f) => f.name), ["Front", "Back"]);
+  assert.equal(col.conf.curModel, String(basic.id)); // default is Basic
 
   // Build a real note + card against it.
-  const mid = models[0].id;
+  const mid = basic.id;
   const note = new Note({ mid, fields: ["2 + 2 = ?", "4"] }).normalize(col.sortFieldIndex(mid));
   col.addNote(note);
   col.addCard(new Card({ nid: note.id, did: 1 }));

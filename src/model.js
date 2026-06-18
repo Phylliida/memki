@@ -271,6 +271,19 @@ export function basicNoteType(id, name = "Basic") {
   };
 }
 
+const CLOZE_CSS = `${DEFAULT_CSS}.cloze {\n font-weight: bold;\n color: blue;\n}\n.nightMode .cloze {\n color: lightblue;\n}\n`;
+
+/** A "Cloze" note type (Text / Back Extra, one cloze template). */
+export function clozeNoteType(id, name = "Cloze") {
+  return {
+    id, name, type: NoteTypeKind.Cloze, mod: nowSec(), usn: -1, sortf: 0, did: null,
+    flds: [mkField("Text", 0), mkField("Back Extra", 1)],
+    tmpls: [mkTemplate("Cloze", 0, "{{cloze:Text}}", "{{cloze:Text}}<br>\n{{Back Extra}}")],
+    css: CLOZE_CSS, latexPre: DEFAULT_LATEX_PRE, latexPost: DEFAULT_LATEX_POST, latexsvg: false,
+    req: [], vers: [], tags: [],
+  };
+}
+
 // --- Collection container ---
 
 export class Collection {
@@ -303,10 +316,11 @@ export class Collection {
     const deck = defaultDeck(1, "Default");
     col.decks["1"] = deck;
     col.dconf["1"] = defaultDeckConfig(1, "Default");
-    const modelId = nowMs();
-    const nt = basicNoteType(modelId, "Basic");
-    col.models[String(modelId)] = nt;
-    col.conf.curModel = String(modelId);
+    const basicId = nowMs();
+    col.models[String(basicId)] = basicNoteType(basicId, "Basic");
+    const clozeId = basicId + 1;
+    col.models[String(clozeId)] = clozeNoteType(clozeId, "Cloze");
+    col.conf.curModel = String(basicId);
     return col;
   }
 
