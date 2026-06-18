@@ -2,9 +2,9 @@
 // Core study/persistence runs fully offline; .apkg import/export lazily loads
 // sql.js + fflate + fzstd from the CDN (see the import map in index.html).
 
-import { Collection, Note, Card } from "../src/model.js";
+import { Collection, Note, Card, NoteTypeKind } from "../src/model.js";
 import { Scheduler } from "../src/scheduler.js";
-import { renderCard } from "../src/template.js";
+import { renderCard, clozeNumbers } from "../src/template.js";
 import { Rating } from "../src/fsrs.js";
 import {
   openCollectionDB, loadCollection, saveCollection,
@@ -91,15 +91,55 @@ function resolveSounds(html) {
   });
 }
 
-/** Render a field's HTML for display: [sound:] players + media object URLs. */
-function renderField(html) {
-  return resolveMedia(resolveSounds(html));
-}
-
 /** Best-effort autoplay of the first media player in the current face (Anki-like). */
 function autoplayFirstMedia() {
   const av = view().querySelector("audio, video");
   if (av) av.play().catch(() => {});
+}
+
+// --- card rendering (note-type CSS + math) ---
+
+// Naively scope a note type's CSS to the card area so deck styling can't bleed
+// into the app chrome. Prefixes each rule's selectors with `scope `; @-rules
+// (media/font-face/keyframes) are left unprefixed.
+function scopeCss(css, scope) {
+  return css.replace(/(^|\})\s*([^{}@]+?)\s*\{/g, (_m, brace, sel) => {
+    const scoped = sel.split(",").map((s) => `${scope} ${s.trim()}`).join(", ");
+    return `${brace} ${scoped} {`;
+  });
+}
+
+function applyModelCss(model) {
+  let style = document.getElementById("model-css");
+  if (!style) {
+    style = document.createElement("style");
+    style.id = "model-css";
+    document.head.appendChild(style);
+  }
+  style.textContent = model?.css ? scopeCss(model.css, ".card-face") : "";
+}
+
+// Convert Anki LaTeX tags to MathJax delimiters; `\(...\)` / `\[...\]` pass through.
+function mathify(html) {
+  return html
+    .replace(/\[latex\]([\s\S]*?)\[\/latex\]/gi, (_m, x) => `\\[${x}\\]`)
+    .replace(/\[\$\$\]([\s\S]*?)\[\/\$\$\]/g, (_m, x) => `\\[${x}\\]`)
+    .replace(/\[\$\]([\s\S]*?)\[\/\$\]/g, (_m, x) => `\\(${x}\\)`);
+}
+
+/** Full display pipeline for a field's HTML: math, sounds, media URLs. */
+function displayHtml(html) {
+  return resolveMedia(resolveSounds(mathify(html)));
+}
+
+/** A card face: model-styled `.card` inside the `.card-face` frame. */
+function cardFace(html) {
+  return el("div", { class: "card-face" }, el("div", { class: "card", html: displayHtml(html) }));
+}
+
+/** Typeset any math in the current view (MathJax loads async via index.html). */
+function typesetMath() {
+  if (window.MathJax?.typesetPromise) window.MathJax.typesetPromise([view()]).catch(() => {});
 }
 
 // --- formatting ---
@@ -123,6 +163,7 @@ function formatInterval(k) {
 
 function renderDecks() {
   state.deckId = null;
+  state.card = null;
   const sched = new Scheduler(state.col);
   const decks = Object.values(state.col.decks).sort((a, b) => a.name.localeCompare(b.name));
   const rows = decks.map((d) => {
@@ -173,20 +214,27 @@ function renderStudy() {
     return;
   }
   const { note, noteType } = noteTypeAndNote(card);
+  applyModelCss(noteType);
   const { question } = renderCard(noteType, card.ord, note);
 
   show(
     back,
-    el("div", { class: "card-face", html: renderField(question) }),
+    cardFace(question),
     el("button", { class: "show-answer", onclick: () => showAnswer() }, "Show Answer"),
   );
   autoplayFirstMedia();
+  typesetMath();
+  // Focus a type-in-the-answer box if the template has one.
+  view().querySelector("#typeans")?.focus();
 }
 
 function showAnswer() {
   const card = state.card;
+  state.answerShown = true;
   const { note, noteType } = noteTypeAndNote(card);
-  const { answer } = renderCard(noteType, card.ord, note);
+  applyModelCss(noteType);
+  const typed = view().querySelector("#typeans")?.value ?? "";
+  const { answer } = renderCard(noteType, card.ord, note, { typed });
   const sched = new Scheduler(state.col);
   const outcomes = sched.nextStates(card);
 
@@ -198,7 +246,7 @@ function showAnswer() {
 
   show(
     el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
-    el("div", { class: "card-face", html: renderField(answer) }),
+    cardFace(answer),
     el("div", { class: "study-controls" },
       ratingBtn("Again", "again", Rating.Again),
       ratingBtn("Hard", "hard", Rating.Hard),
@@ -207,6 +255,7 @@ function showAnswer() {
     ),
   );
   autoplayFirstMedia();
+  typesetMath();
 }
 
 async function gradeCard(rating) {
@@ -219,30 +268,50 @@ async function gradeCard(rating) {
 }
 
 function renderAddCard() {
+  state.card = null;
   const models = Object.values(state.col.models);
   const decks = Object.values(state.col.decks);
   const modelSel = el("select", {}, ...models.map((m) => el("option", { value: m.id }, m.name)));
   if (state.col.conf.curModel) modelSel.value = state.col.conf.curModel;
   const deckSel = el("select", {}, ...decks.map((d) => el("option", { value: d.id }, d.name)));
-  const front = el("textarea", { placeholder: "Front" });
-  const back = el("textarea", { placeholder: "Back" });
+
+  const fieldsWrap = el("div", { class: "form-fields" });
+  let inputs = [];
+  const rebuildFields = () => {
+    const model = state.col.noteType(Number(modelSel.value));
+    inputs = [];
+    fieldsWrap.replaceChildren(...model.flds.map((f) => {
+      const ta = el("textarea", { placeholder: f.name });
+      inputs.push(ta);
+      return el("label", {}, f.name, ta);
+    }));
+  };
+  modelSel.addEventListener("change", rebuildFields);
+  rebuildFields();
 
   const save = async () => {
     const model = state.col.noteType(Number(modelSel.value));
-    const note = new Note({
-      mid: model.id,
-      fields: model.flds.map((_, i) => (i === 0 ? front.value : i === 1 ? back.value : "")),
-    }).normalize(model.sortf ?? 0);
+    const fields = inputs.map((ta) => ta.value);
+    if (!fields[0].trim()) { setStatus("The first field is empty."); return; }
+    const note = new Note({ mid: model.id, fields }).normalize(model.sortf ?? 0);
     state.col.addNote(note);
-    // one card per template
-    for (const tmpl of model.tmpls) {
+
+    // Cloze notes generate one card per distinct cloze number; otherwise one per template.
+    let ords;
+    if (model.type === NoteTypeKind.Cloze) {
+      const nums = [...clozeNumbers(fields[0])].sort((a, b) => a - b);
+      ords = (nums.length ? nums : [1]).map((n) => n - 1);
+    } else {
+      ords = model.tmpls.map((t) => t.ord);
+    }
+    for (const ord of ords) {
       const due = state.col.conf.nextPos ?? 1;
       state.col.conf.nextPos = due + 1;
-      const card = state.col.addCard(new Card({ nid: note.id, did: Number(deckSel.value), ord: tmpl.ord, due }));
+      const card = state.col.addCard(new Card({ nid: note.id, did: Number(deckSel.value), ord, due }));
       await putCard(state.db, card);
     }
     await putNoteAndMeta(note);
-    setStatus("Card added.");
+    setStatus(`Added (${ords.length} card${ords.length > 1 ? "s" : ""}).`);
     renderDecks();
   };
 
@@ -252,8 +321,7 @@ function renderAddCard() {
     el("div", { class: "form" },
       el("label", {}, "Note type", modelSel),
       el("label", {}, "Deck", deckSel),
-      el("label", {}, "Front", front),
-      el("label", {}, "Back", back),
+      fieldsWrap,
       el("div", { class: "row" }, el("button", { onclick: save }, "Save")),
     ),
   );
@@ -324,6 +392,22 @@ function wireHeader() {
   document.getElementById("btn-export").addEventListener("click", doExport);
 }
 
+// Anki-style shortcuts: space/Enter flips; 1–4 (and space/Enter) grade.
+function wireKeyboard() {
+  const GRADE = { 1: Rating.Again, 2: Rating.Hard, 3: Rating.Good, 4: Rating.Easy, " ": Rating.Good, Enter: Rating.Good };
+  document.addEventListener("keydown", (e) => {
+    if (!state.card) return; // only while a card is being studied
+    const inField = e.target?.matches?.("input, textarea, select");
+    if (!state.answerShown) {
+      if (e.key === "Enter") { e.preventDefault(); showAnswer(); }
+      else if (e.key === " " && !inField) { e.preventDefault(); showAnswer(); }
+    } else if (!inField && GRADE[e.key]) {
+      e.preventDefault();
+      gradeCard(GRADE[e.key]);
+    }
+  });
+}
+
 async function init() {
   state.db = await openCollectionDB();
   state.col = await loadCollection(state.db);
@@ -333,6 +417,7 @@ async function init() {
   }
   state.media = await loadMedia(state.db);
   wireHeader();
+  wireKeyboard();
   renderDecks();
 }
 

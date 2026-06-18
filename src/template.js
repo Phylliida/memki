@@ -75,8 +75,29 @@ function fieldValue(ctx, key) {
   const raw = ctx.fields?.[name] ?? "";
   if (filter === "text") return stripHtml(raw);
   if (filter === "cloze") return clozeFilter(raw, ctx.clozeOrd ?? 0, ctx.side ?? "q");
-  // {{type:Field}} marker for the UI; other unknown filters fall through to raw.
+  if (filter === "type") {
+    return (ctx.side ?? "q") === "q"
+      ? `<input id="typeans" class="typeans" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">`
+      : typeDiff(ctx.typed ?? "", stripHtml(raw));
+  }
+  // other unknown filters fall through to the bare field value
   return raw;
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+/** A simple "type the answer" result: green when correct, else typed vs correct. */
+export function typeDiff(typed, correct) {
+  const t = typed.trim();
+  const c = correct.trim();
+  if (t === c) return `<div class="typeans-result correct">${escapeHtml(c)}</div>`;
+  return (
+    `<div class="typeans-result">` +
+    `<div class="typed-bad">${escapeHtml(t) || "&nbsp;"}</div>` +
+    `<div class="typed-good">${escapeHtml(c)}</div></div>`
+  );
 }
 
 function nonEmpty(ctx, key) {
@@ -135,7 +156,7 @@ export function fieldMap(noteType, note) {
  * @param {import("./model.js").Note} note
  * @returns {{ question: string, answer: string }}
  */
-export function renderCard(noteType, ord, note) {
+export function renderCard(noteType, ord, note, opts = {}) {
   const isCloze = noteType.type === NoteTypeKind.Cloze;
   // Cloze note types have a single template; the ordinal selects the cloze number.
   const tmpl = noteType.tmpls[isCloze ? 0 : ord];
@@ -144,6 +165,8 @@ export function renderCard(noteType, ord, note) {
   const Tags = (note.tags ?? []).join(" ");
   const clozeOrd = isCloze ? ord + 1 : undefined;
   const question = renderTemplate(tmpl.qfmt, { fields, Tags, clozeOrd, side: "q" });
-  const answer = renderTemplate(tmpl.afmt, { fields, Tags, FrontSide: question, clozeOrd, side: "a" });
+  const answer = renderTemplate(tmpl.afmt, {
+    fields, Tags, FrontSide: question, clozeOrd, side: "a", typed: opts.typed ?? "",
+  });
   return { question, answer };
 }

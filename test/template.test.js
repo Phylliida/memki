@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { renderTemplate, renderCard, fieldMap, clozeFilter, clozeNumbers } from "../src/template.js";
+import { renderTemplate, renderCard, fieldMap, clozeFilter, clozeNumbers, typeDiff } from "../src/template.js";
 import { basicNoteType, clozeNoteType, Note } from "../src/model.js";
 
 test("renderCard renders a Basic note's question and answer", () => {
@@ -59,6 +59,20 @@ test("cloze: hint is shown in brackets on the question", () => {
 
 test("clozeNumbers finds distinct ordinals", () => {
   assert.deepEqual([...clozeNumbers("{{c1::a}} {{c2::b}} {{c1::c}}")].sort(), [1, 2]);
+});
+
+test("type-in-the-answer: input on question, diff on answer", () => {
+  const nt = basicNoteType(7);
+  nt.tmpls[0].qfmt = "{{type:Back}}";
+  const note = new Note({ mid: 7, fields: ["Q", "Paris"] });
+  const q = renderCard(nt, 0, note, {});
+  assert.match(q.question, /<input[^>]*id="typeans"/);
+
+  assert.match(typeDiff("Paris", "Paris"), /class="typeans-result correct"/);
+  const wrong = typeDiff("Parris", "Paris");
+  assert.match(wrong, /typed-bad/);
+  assert.match(wrong, /typed-good/);
+  assert.match(typeDiff("<b>x</b>", "y"), /&lt;b&gt;x&lt;\/b&gt;/); // typed text is escaped
 });
 
 test("renderCard on a Cloze note type selects by ordinal", () => {

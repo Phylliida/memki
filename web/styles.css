@@ -90,7 +90,20 @@ button:disabled { opacity: 0.5; cursor: default; }
 }
 .card-face img { max-width: 100%; height: auto; }
 .card-face .av { display: block; margin: 14px auto; max-width: 100%; }
-hr#answer { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+/* The inner .card carries the note type's own (scoped) CSS; give it a clean
+   default canvas so light-themed deck styling reads correctly. */
+.card-face .card { background: #fff; color: #000; border-radius: 8px; padding: 20px; }
+hr#answer { border: none; border-top: 1px solid #ccc; margin: 20px 0; }
+
+/* type-in-the-answer */
+.typeans {
+  display: block; width: 100%; max-width: 360px; margin: 10px auto; padding: 8px 10px;
+  font-size: 18px; border: 1px solid var(--border); border-radius: 6px;
+  background: #fff; color: #000;
+}
+.typeans-result { font-size: 20px; margin: 10px 0; }
+.typeans-result.correct, .typed-good { color: #0a7d28; }
+.typed-bad { color: #c0392b; text-decoration: line-through; }
 
 .study-controls { margin-top: 18px; display: flex; justify-content: center; gap: 10px; }
 .rate { flex: 1; max-width: 150px; display: flex; flex-direction: column; gap: 2px; align-items: center; padding: 10px; }
@@ -108,6 +121,7 @@ hr#answer { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 
 /* Add-card form */
 .form { display: flex; flex-direction: column; gap: 12px; }
+.form-fields { display: flex; flex-direction: column; gap: 12px; }
 .form label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
 .form input, .form textarea, .form select {
   background: var(--panel-2); color: var(--text);
