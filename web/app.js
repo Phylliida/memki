@@ -6,9 +6,10 @@ import { Collection, Note, Card, NoteTypeKind } from "../src/model.js";
 import { Scheduler } from "../src/scheduler.js";
 import { renderCard, clozeNumbers } from "../src/template.js";
 import { Rating } from "../src/fsrs.js";
+import { stripHtml } from "../src/text.js";
 import {
   openCollectionDB, loadCollection, saveCollection,
-  putCard, putRevlog, putMeta, saveMedia, loadMedia, clearAll,
+  putCard, putNote, putRevlog, putMeta, saveMedia, loadMedia, clearAll, deleteNoteAndCards,
 } from "../src/storage.js";
 
 const SQL_CDN = "https://cdn.jsdelivr.net/npm/sql.js@1.14.1/dist/";
@@ -328,9 +329,105 @@ function renderAddCard() {
 }
 
 async function putNoteAndMeta(note) {
-  const { putNote } = await import("../src/storage.js");
   await putNote(state.db, note);
   await putMeta(state.db, state.col);
+}
+
+// --- browse / edit ---
+
+const cardStateLabel = (card) => {
+  if (card.queue < 0) return "suspended";
+  return ["new", "learning", "review", "relearning"][card.type] ?? "?";
+};
+
+function deckName(did) {
+  return state.col.decks[String(did)]?.name ?? "?";
+}
+
+function renderBrowse(query = "") {
+  state.card = null;
+  const search = el("input", {
+    class: "search", type: "search", placeholder: "Search fields, tags, deck…", value: query,
+    oninput: (e) => { state.browseQuery = e.target.value; renderRows(e.target.value); },
+  });
+  const list = el("div", { class: "browse-list" });
+
+  const renderRows = (qstr) => {
+    const ql = qstr.trim().toLowerCase();
+    const all = [...state.col.cards.values()].filter((c) => {
+      if (!ql) return true;
+      const note = state.col.notes.get(c.nid);
+      const hay = `${note.fields.join(" ")} ${note.tags.join(" ")} ${deckName(c.did)}`.toLowerCase();
+      return hay.includes(ql);
+    });
+    const shown = all.slice(0, 500);
+    list.replaceChildren(
+      ...shown.map((card) => {
+        const note = state.col.notes.get(card.nid);
+        const title = stripHtml(note.fields[0] ?? "").slice(0, 80) || "(empty)";
+        return el("div", { class: "browse-row", onclick: () => renderEditNote(note.id) },
+          el("span", { class: "br-title" }, title),
+          el("span", { class: "br-deck" }, deckName(card.did)),
+          el("span", { class: `br-state ${cardStateLabel(card)}` }, cardStateLabel(card)),
+        );
+      }),
+      all.length > shown.length ? el("div", { class: "center" }, `…and ${all.length - shown.length} more (refine search)`) : "",
+      all.length ? "" : el("div", { class: "center" }, "No matching cards."),
+    );
+    setStatus(`${all.length} card${all.length === 1 ? "" : "s"}`);
+  };
+
+  show(
+    el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
+    el("h2", {}, "Browse"),
+    search,
+    list,
+  );
+  renderRows(query);
+}
+
+function renderEditNote(noteId) {
+  const note = state.col.notes.get(noteId);
+  if (!note) return renderBrowse(state.browseQuery ?? "");
+  const model = state.col.noteType(note.mid);
+
+  const inputs = model.flds.map((f) => {
+    const ta = el("textarea", {});
+    ta.value = note.fields[f.ord] ?? "";
+    return { f, ta };
+  });
+  const tagsInput = el("input", { type: "text", value: (note.tags ?? []).join(" ") });
+
+  const save = async () => {
+    note.fields = inputs.map(({ ta }) => ta.value);
+    note.tags = tagsInput.value.split(/\s+/).filter(Boolean);
+    note.mod = Math.floor(Date.now() / 1000);
+    note.normalize(model.sortf ?? 0);
+    await putNote(state.db, note);
+    setStatus("Saved.");
+    renderBrowse(state.browseQuery ?? "");
+  };
+
+  const del = async () => {
+    if (!confirm("Delete this note and its cards?")) return;
+    const cardIds = state.col.removeNote(noteId);
+    await deleteNoteAndCards(state.db, noteId, cardIds);
+    setStatus("Deleted.");
+    renderBrowse(state.browseQuery ?? "");
+  };
+
+  show(
+    el("div", { class: "crumbs", onclick: () => renderBrowse(state.browseQuery ?? "") }, "← Browse"),
+    el("h2", {}, `Edit (${model.name})`),
+    el("div", { class: "form" },
+      ...inputs.map(({ f, ta }) => el("label", {}, f.name, ta)),
+      el("label", {}, "Tags", tagsInput),
+      el("div", { class: "row" },
+        el("button", { onclick: save }, "Save"),
+        el("button", { class: "danger", onclick: del }, "Delete"),
+      ),
+    ),
+  );
 }
 
 // --- import / export (.apkg) ---
@@ -383,6 +480,7 @@ async function doExport() {
 
 function wireHeader() {
   document.getElementById("btn-add").addEventListener("click", renderAddCard);
+  document.getElementById("btn-browse").addEventListener("click", () => renderBrowse(state.browseQuery ?? ""));
   const fileInput = document.getElementById("file-import");
   document.getElementById("btn-import").addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", () => {

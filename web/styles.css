@@ -129,3 +129,24 @@ hr#answer { border: none; border-top: 1px solid #ccc; margin: 20px 0; }
 }
 .form textarea { min-height: 80px; resize: vertical; }
 .form .row { display: flex; gap: 10px; }
+.form input[type="text"] { width: 100%; }
+button.danger { border-color: var(--again); color: var(--again); margin-left: auto; }
+
+/* Browse */
+.search {
+  width: 100%; padding: 10px 12px; font-size: 15px; margin-bottom: 14px;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+}
+.browse-list { display: flex; flex-direction: column; gap: 4px; }
+.browse-row {
+  display: flex; align-items: center; gap: 12px; padding: 9px 12px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+}
+.browse-row:hover { border-color: var(--accent); }
+.br-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.br-deck { color: var(--muted); font-size: 13px; }
+.br-state { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--panel-2); color: var(--muted); }
+.br-state.new { color: var(--accent); }
+.br-state.learning, .br-state.relearning { color: var(--hard); }
+.br-state.review { color: var(--good); }
+.br-state.suspended { color: var(--again); }

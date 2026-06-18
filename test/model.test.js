@@ -92,6 +92,23 @@ test("Card memoryState getter/setter writes through data; row round-trips", () =
   assert.equal(back.queue, CardQueue.Review);
 });
 
+test("removeNote deletes the note + its cards and records graves", () => {
+  const col = Collection.createDefault();
+  const mid = Object.values(col.models).find((m) => m.name === "Basic").id;
+  const note = new Note({ mid, fields: ["Q", "A"] }).normalize();
+  col.addNote(note);
+  col.addCard(new Card({ nid: note.id, did: 1, ord: 0 }));
+  col.addCard(new Card({ nid: note.id, did: 1, ord: 1 }));
+
+  const deleted = col.removeNote(note.id);
+  assert.equal(deleted.length, 2);
+  assert.equal(col.notes.size, 0);
+  assert.equal(col.cards.size, 0);
+  // one card grave per card + one note grave
+  assert.equal(col.graves.filter((g) => g.type === 0).length, 2);
+  assert.equal(col.graves.filter((g) => g.type === 1).length, 1);
+});
+
 test("Revlog row round-trips in column order", () => {
   const r = new Revlog({ id: 1700000000000, cid: 42, ease: 3, ivl: 4, lastIvl: 1, factor: 2500, time: 1234, type: 0 });
   assert.deepEqual(Revlog.fromRow(r.toRow()), r);

@@ -109,6 +109,14 @@ export async function putRevlog(db, entry) {
   await txDone(tx);
 }
 
+/** Delete a note and its cards from storage. */
+export async function deleteNoteAndCards(db, noteId, cardIds) {
+  const tx = db.transaction(["notes", "cards"], "readwrite");
+  tx.objectStore("notes").delete(noteId);
+  for (const id of cardIds) tx.objectStore("cards").delete(id);
+  await txDone(tx);
+}
+
 /** Persist the collection-level metadata (conf/models/decks/dconf/...). */
 export async function putMeta(db, collection) {
   const tx = db.transaction("meta", "readwrite");

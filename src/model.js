@@ -306,6 +306,8 @@ export class Collection {
     this.cards = new Map();
     /** @type {Revlog[]} */
     this.revlog = [];
+    /** Deletion tombstones for sync ({ usn, oid, type }); type 0=card 1=note 2=deck. */
+    this.graves = [];
   }
 
   /** A fresh, empty collection with the Default deck, default options, and Basic note type. */
@@ -350,6 +352,23 @@ export class Collection {
   addRevlog(entry) {
     this.revlog.push(entry);
     return entry;
+  }
+
+  /** Cards belonging to a note. */
+  cardsForNote(noteId) {
+    return [...this.cards.values()].filter((c) => c.nid === noteId);
+  }
+
+  /** Remove a note and all its cards, recording graves. Returns deleted card ids. */
+  removeNote(noteId) {
+    const cardIds = this.cardsForNote(noteId).map((c) => c.id);
+    for (const id of cardIds) {
+      this.cards.delete(id);
+      this.graves.push({ usn: -1, oid: id, type: 0 });
+    }
+    this.notes.delete(noteId);
+    this.graves.push({ usn: -1, oid: noteId, type: 1 });
+    return cardIds;
   }
 
   /** Note type (model) lookup by numeric id. */
