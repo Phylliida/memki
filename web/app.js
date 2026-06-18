@@ -2,7 +2,7 @@
 // Core study/persistence runs fully offline; .apkg import/export lazily loads
 // sql.js + fflate + fzstd from the CDN (see the import map in index.html).
 
-import { Collection, Note, Card, NoteTypeKind, CardType } from "../src/model.js";
+import { Collection, Note, Card, NoteTypeKind, CardType, imageOcclusionNoteType } from "../src/model.js";
 import { Scheduler } from "../src/scheduler.js";
 import { renderCard, clozeNumbers } from "../src/template.js";
 import { collectionStats } from "../src/stats.js";
@@ -316,14 +316,15 @@ function renderStudy() {
     return;
   }
   const { note, noteType } = noteTypeAndNote(card);
+  const showAnswerBtn = el("button", { class: "show-answer", onclick: () => showAnswer() }, "Show Answer");
+  if (noteType.ossIO) {
+    show(back, occlusionFace(note, card.ord, "q"), showAnswerBtn);
+    return;
+  }
   applyModelCss(noteType);
   const { question } = renderCard(noteType, card.ord, note);
 
-  show(
-    back,
-    cardFace(question),
-    el("button", { class: "show-answer", onclick: () => showAnswer() }, "Show Answer"),
-  );
+  show(back, cardFace(question), showAnswerBtn);
   autoplayFirstMedia();
   typesetMath();
   // Focus a type-in-the-answer box if the template has one.
@@ -334,28 +335,29 @@ function showAnswer() {
   const card = state.card;
   state.answerShown = true;
   const { note, noteType } = noteTypeAndNote(card);
-  applyModelCss(noteType);
-  const typed = view().querySelector("#typeans")?.value ?? "";
-  const { answer } = renderCard(noteType, card.ord, note, { typed });
   const sched = new Scheduler(state.col, { fuzz: true });
   const outcomes = sched.nextStates(card);
-
   const ratingBtn = (label, cls, rating) =>
     el("button", { class: `rate ${cls}`, onclick: () => gradeCard(rating) },
       el("span", {}, label),
       el("small", {}, formatInterval(outcomes[cls].interval)),
     );
-
-  show(
-    el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
-    cardFace(answer),
-    el("div", { class: "study-controls" },
-      ratingBtn("Again", "again", Rating.Again),
-      ratingBtn("Hard", "hard", Rating.Hard),
-      ratingBtn("Good", "good", Rating.Good),
-      ratingBtn("Easy", "easy", Rating.Easy),
-    ),
+  const controls = el("div", { class: "study-controls" },
+    ratingBtn("Again", "again", Rating.Again),
+    ratingBtn("Hard", "hard", Rating.Hard),
+    ratingBtn("Good", "good", Rating.Good),
+    ratingBtn("Easy", "easy", Rating.Easy),
   );
+  const crumbs = el("div", { class: "crumbs", onclick: renderDecks }, "← Decks");
+
+  if (noteType.ossIO) {
+    show(crumbs, occlusionFace(note, card.ord, "a"), controls);
+    return;
+  }
+  applyModelCss(noteType);
+  const typed = view().querySelector("#typeans")?.value ?? "";
+  const { answer } = renderCard(noteType, card.ord, note, { typed });
+  show(crumbs, cardFace(answer), controls);
   autoplayFirstMedia();
   typesetMath();
 }
@@ -469,7 +471,10 @@ function renderAddCard() {
       el("label", {}, "Note type", modelSel),
       el("label", {}, "Deck", deckSel),
       fieldsWrap,
-      el("div", { class: "row" }, el("button", { onclick: save }, "Save")),
+      el("div", { class: "row" },
+        el("button", { onclick: save }, "Save"),
+        el("button", { class: "icon", onclick: renderImageOcclusion, title: "Create image-occlusion cards" }, "🖼 Image Occlusion"),
+      ),
     ),
   );
 }
@@ -574,6 +579,158 @@ function renderEditNote(noteId) {
       ),
     ),
   );
+}
+
+// --- image occlusion ---
+
+const SVGNS = "http://www.w3.org/2000/svg";
+const svgEl = (tag, attrs = {}) => {
+  const n = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  return n;
+};
+const normRect = (a, b) => ({
+  x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y),
+});
+const setRect = (rect, m) => {
+  rect.setAttribute("x", m.x * 100); rect.setAttribute("y", m.y * 100);
+  rect.setAttribute("width", m.w * 100); rect.setAttribute("height", m.h * 100);
+};
+
+// mode: "edit" (all masks shown), "q" (cover only the active), "a" (outline active).
+function svgOverlay(masks, activeIdx, mode) {
+  const svg = svgEl("svg", { viewBox: "0 0 100 100", preserveAspectRatio: "none", class: "io-svg" });
+  masks.forEach((m, i) => {
+    if (mode === "q" && i !== activeIdx) return;
+    if (mode === "a" && i !== activeIdx) return;
+    const rect = svgEl("rect", {
+      class: mode === "a" ? "io-mask-active" : mode === "q" ? "io-mask-q" : "io-mask-edit",
+    });
+    setRect(rect, m);
+    svg.append(rect);
+  });
+  return svg;
+}
+
+function attachDrawing(svg, onCommit) {
+  let start = null;
+  let preview = null;
+  const toFrac = (e) => {
+    const r = svg.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+  };
+  svg.addEventListener("pointerdown", (e) => {
+    start = toFrac(e);
+    preview = svgEl("rect", { class: "io-mask-edit" });
+    svg.append(preview);
+    try { svg.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+  });
+  svg.addEventListener("pointermove", (e) => { if (start) setRect(preview, normRect(start, toFrac(e))); });
+  svg.addEventListener("pointerup", (e) => {
+    if (!start) return;
+    const r = normRect(start, toFrac(e));
+    if (preview) preview.remove();
+    if (r.w > 0.01 && r.h > 0.01) onCommit(r);
+    start = null;
+    preview = null;
+  });
+}
+
+async function renderImageOcclusion() {
+  state.card = null;
+  let nt = Object.values(state.col.models).find((m) => m.ossIO);
+  if (!nt) {
+    nt = imageOcclusionNoteType(state.col.nextId());
+    state.col.models[String(nt.id)] = nt;
+    await persistAll();
+  }
+  const decks = Object.values(state.col.decks).filter((d) => !d.dyn);
+  const deckSel = el("select", {}, ...decks.map((d) => el("option", { value: d.id }, d.name)));
+  const headerInput = el("input", { type: "text", placeholder: "Header (optional)" });
+  const backInput = el("textarea", { placeholder: "Back extra (optional)" });
+  const fileInput = el("input", { type: "file", accept: "image/*" });
+  const stage = el("div", { class: "io-stage" });
+  const maskList = el("div", { class: "io-masklist" });
+
+  let imageName = null;
+  const masks = [];
+
+  const refresh = () => {
+    maskList.replaceChildren(...masks.map((m, i) =>
+      el("button", { class: "io-maskchip", onclick: () => { masks.splice(i, 1); refresh(); } }, `Mask ${i + 1} ✕`)));
+    stage.replaceChildren();
+    if (!imageName) {
+      stage.append(el("p", { class: "muted" }, "Choose an image, then drag on it to draw masks."));
+      return;
+    }
+    stage.append(el("img", { src: mediaUrl(imageName) }));
+    const svg = svgOverlay(masks, -1, "edit");
+    stage.append(svg);
+    attachDrawing(svg, (r) => { masks.push(r); refresh(); });
+  };
+
+  fileInput.addEventListener("change", async () => {
+    const f = fileInput.files[0];
+    if (!f) return;
+    const ext = (f.name.split(".").pop() || "png").toLowerCase();
+    imageName = `io-${state.col.nextId()}.${ext}`;
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    state.media.set(imageName, bytes);
+    state.mediaUrls.delete(imageName);
+    await saveMedia(state.db, new Map([[imageName, bytes]]));
+    masks.length = 0;
+    refresh();
+  });
+
+  const create = async () => {
+    if (!imageName) { setStatus("Choose an image first."); return; }
+    if (!masks.length) { setStatus("Draw at least one mask."); return; }
+    const note = new Note({
+      mid: nt.id, fields: [imageName, JSON.stringify(masks), headerInput.value, backInput.value],
+    }).normalize(nt.sortf ?? 2);
+    state.col.addNote(note);
+    masks.forEach((_, i) => {
+      const due = state.col.conf.nextPos ?? 1;
+      state.col.conf.nextPos = due + 1;
+      state.col.addCard(new Card({ nid: note.id, did: Number(deckSel.value), ord: i, due }));
+    });
+    await putNoteAndMeta(note);
+    for (const c of state.col.cardsForNote(note.id)) await putCard(state.db, c);
+    setStatus(`Created ${masks.length} occlusion cards.`);
+    renderDecks();
+  };
+
+  show(
+    el("div", { class: "crumbs", onclick: renderAddCard }, "← Add"),
+    el("h2", {}, "Image Occlusion"),
+    el("div", { class: "form" },
+      el("label", {}, "Deck", deckSel),
+      el("label", {}, "Image", fileInput),
+      stage,
+      maskList,
+      el("label", {}, "Header", headerInput),
+      el("label", {}, "Back extra", backInput),
+      el("div", { class: "row" }, el("button", { onclick: create }, "Create cards")),
+    ),
+  );
+  refresh();
+}
+
+/** Render an image-occlusion card face (hide-one-guess-one). */
+function occlusionFace(note, ord, side) {
+  const image = note.fields[0];
+  let masks = [];
+  try { masks = JSON.parse(note.fields[1] || "[]"); } catch { /* ignore */ }
+  const header = note.fields[2] || "";
+  const back = note.fields[3] || "";
+  const stage = el("div", { class: "io-stage" },
+    el("img", { src: mediaUrl(image) }),
+    svgOverlay(masks, ord, side === "q" ? "q" : "a"));
+  const parts = [];
+  if (header) parts.push(el("div", { class: "io-header" }, header));
+  parts.push(stage);
+  if (side === "a" && back) parts.push(el("div", { class: "io-back", html: displayHtml(back) }));
+  return el("div", { class: "card-face" }, ...parts);
 }
 
 // --- note-type / template editor ---

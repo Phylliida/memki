@@ -284,6 +284,23 @@ export function clozeNoteType(id, name = "Cloze") {
   };
 }
 
+/**
+ * An image-occlusion note type (oss-anki's own, marked with `ossIO: true`).
+ * Fields: Image (media filename), Masks (JSON array of {x,y,w,h} fractions),
+ * Header, Back Extra. The UI renders these specially (image + SVG masks); one
+ * card is generated per mask. Not wire-compatible with Anki's own IO format.
+ */
+export function imageOcclusionNoteType(id, name = "Image Occlusion") {
+  return {
+    id, name, type: NoteTypeKind.Standard, mod: nowSec(), usn: -1, sortf: 2, did: null,
+    ossIO: true,
+    flds: [mkField("Image", 0), mkField("Masks", 1), mkField("Header", 2), mkField("Back Extra", 3)],
+    tmpls: [mkTemplate("Occlusion", 0, "{{Header}}", "{{Header}}<br>{{Back Extra}}")],
+    css: DEFAULT_CSS, latexPre: DEFAULT_LATEX_PRE, latexPost: DEFAULT_LATEX_POST, latexsvg: false,
+    req: [], vers: [], tags: [],
+  };
+}
+
 // --- Collection container ---
 
 export class Collection {

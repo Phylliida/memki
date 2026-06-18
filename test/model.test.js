@@ -9,7 +9,7 @@ import { fieldChecksum, joinFields, splitFields, stripHtml, stripHtmlPreservingM
 import { base91 } from "../src/ids.js";
 import {
   Note, Card, Revlog, Collection, CardType, CardQueue,
-  parseCardData, serializeCardData, joinTags, splitTags,
+  parseCardData, serializeCardData, joinTags, splitTags, imageOcclusionNoteType,
 } from "../src/model.js";
 
 test("sha1 matches the standard 'test' vector", () => {
@@ -167,6 +167,22 @@ test("note-type editing migrates notes and cards", () => {
   assert.equal(cards.length, 1);
   assert.equal(cards[0].ord, 0);
   assert.equal(nt.tmpls.length, 1);
+});
+
+test("image-occlusion note type: one card per mask", () => {
+  const col = Collection.createDefault();
+  const nt = imageOcclusionNoteType(col.nextId());
+  col.models[String(nt.id)] = nt;
+  assert.equal(nt.ossIO, true);
+
+  const masks = [{ x: 0.1, y: 0.1, w: 0.2, h: 0.1 }, { x: 0.5, y: 0.5, w: 0.3, h: 0.2 }];
+  const note = new Note({ mid: nt.id, fields: ["cat.png", JSON.stringify(masks), "Anatomy", ""] }).normalize(nt.sortf);
+  col.addNote(note);
+  masks.forEach((_, i) => col.addCard(new Card({ nid: note.id, did: 1, ord: i })));
+
+  assert.equal(col.cardsForNote(note.id).length, 2);
+  assert.deepEqual(JSON.parse(note.fields[1]), masks);
+  assert.equal(note.sfld, "Anatomy"); // sort field = Header
 });
 
 test("Revlog row round-trips in column order", () => {
