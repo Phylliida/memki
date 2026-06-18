@@ -1,0 +1,24 @@
+{
+  "name": "oss-anki",
+  "version": "0.0.1",
+  "description": "Open-source, framework-free implementation of Anki: a precise FSRS-6 / SM-2 spaced-repetition core with full .apkg/.colpkg interop.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Phylliida Dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Phylliida/anki.git"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./fsrs": "./src/fsrs.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "files": [
+    "src"
+  ],
+  "comment": "The core (fsrs, sm2, model) has ZERO runtime dependencies. Interop (.apkg/.colpkg read/write) will add sql.js, fflate, and fzstd as optional deps once those modules land.",
+  "optionalDependencies": {}
+}
