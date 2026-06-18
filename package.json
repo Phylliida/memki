@@ -13,6 +13,7 @@
     ".": "./src/index.js",
     "./fsrs": "./src/fsrs.js",
     "./model": "./src/model.js",
+    "./scheduler": "./src/scheduler.js",
     "./apkg": "./src/apkg.js",
     "./sqljs-node": "./src/sqljs-node.js"
   },

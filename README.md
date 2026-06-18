@@ -21,8 +21,8 @@ Early. Building the core library first.
 | Formula reference (`docs/FSRS6.md`) | ✅ |
 | Data model (col/notes/cards/revlog/decks/models) | ✅ schema-v11 entities, csum/base91/GUID match rslib |
 | `.apkg` / `.colpkg` import (read real collections) | ✅ reads a real deck; recomputed csum/sfld match Anki |
-| Legacy SM-2 / v3 scheduler | ⬜ planned |
 | `.apkg` export (write real collections) | ✅ schema-v11; real deck round-trips import→export→import |
+| Scheduler (v3: SM-2 + FSRS card lifecycle) | ✅ matches rslib state-machine vectors; answer-card flow + revlog |
 | IndexedDB persistence | ⬜ planned |
 | Browser UI | ⬜ planned |
 

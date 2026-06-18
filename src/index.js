@@ -7,6 +7,7 @@
 
 export * from "./fsrs.js";
 export * from "./model.js";
+export * from "./scheduler.js";
 export * from "./text.js";
 export * from "./ids.js";
 export { sha1Bytes, sha1Hex } from "./sha1.js";
