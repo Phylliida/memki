@@ -509,6 +509,112 @@ function renderEditNote(noteId) {
   );
 }
 
+// --- note-type / template editor ---
+
+function renderNoteTypes() {
+  state.card = null;
+  const models = Object.values(state.col.models);
+  const add = el("button", {
+    onclick: () => {
+      const name = prompt("New note type name:");
+      if (!name || !name.trim()) return;
+      const cloze = confirm("Cloze type? (OK = Cloze, Cancel = Standard)");
+      const nt = state.col.addNoteType(name.trim(), cloze ? NoteTypeKind.Cloze : NoteTypeKind.Standard);
+      persistAll().then(() => renderEditNoteType(nt.id));
+    },
+  }, "+ New");
+
+  show(
+    el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
+    el("div", { class: "decks-head" }, el("h2", {}, "Note Types"), add),
+    ...models.map((m) => el("div", { class: "browse-row", onclick: () => renderEditNoteType(m.id) },
+      el("span", { class: "br-title" }, m.name),
+      el("span", { class: "br-deck" },
+        `${m.flds.length} fields · ${m.tmpls.length} template${m.tmpls.length > 1 ? "s" : ""}` +
+        (m.type === NoteTypeKind.Cloze ? " · cloze" : "")),
+    )),
+  );
+}
+
+function renderEditNoteType(mid) {
+  state.card = null;
+  const nt = state.col.noteType(mid);
+  if (!nt) return renderNoteTypes();
+  const isCloze = nt.type === NoteTypeKind.Cloze;
+
+  const nameInput = el("input", { type: "text", value: nt.name });
+  const cssArea = el("textarea", { class: "mono" });
+  cssArea.value = nt.css ?? "";
+
+  const fieldNameInputs = [];
+  const fieldsBox = el("div", { class: "nt-list" });
+  const renderFields = () => {
+    fieldNameInputs.length = 0;
+    fieldsBox.replaceChildren(...nt.flds.map((f, i) => {
+      const inp = el("input", { type: "text", value: f.name });
+      fieldNameInputs.push({ ord: i, inp });
+      const rm = el("button", { class: "icon", title: "Remove field",
+        onclick: async () => { state.col.removeField(mid, i); await persistAll(); renderEditNoteType(mid); } }, "🗑");
+      return el("div", { class: "nt-row" }, inp, nt.flds.length > 1 ? rm : "");
+    }));
+  };
+  renderFields();
+
+  const tmplInputs = [];
+  const tmplBox = el("div", { class: "nt-list" });
+  const renderTemplates = () => {
+    tmplInputs.length = 0;
+    tmplBox.replaceChildren(...nt.tmpls.map((t, i) => {
+      const name = el("input", { type: "text", value: t.name });
+      const qfmt = el("textarea", { class: "mono" }); qfmt.value = t.qfmt;
+      const afmt = el("textarea", { class: "mono" }); afmt.value = t.afmt;
+      tmplInputs.push({ ord: i, name, qfmt, afmt });
+      const rm = el("button", { class: "icon", title: "Remove template",
+        onclick: async () => { state.col.removeTemplate(mid, i); await persistAll(); renderEditNoteType(mid); } }, "🗑");
+      return el("div", { class: "nt-tmpl" },
+        el("div", { class: "nt-tmpl-head" }, name, (!isCloze && nt.tmpls.length > 1) ? rm : ""),
+        el("label", {}, "Front template", qfmt),
+        el("label", {}, "Back template", afmt),
+      );
+    }));
+  };
+  renderTemplates();
+
+  const save = async () => {
+    nt.name = nameInput.value.trim() || nt.name;
+    for (const { ord, inp } of fieldNameInputs) state.col.renameField(mid, ord, inp.value);
+    for (const { ord, name, qfmt, afmt } of tmplInputs) {
+      state.col.setTemplate(mid, ord, { name: name.value, qfmt: qfmt.value, afmt: afmt.value });
+    }
+    state.col.setCss(mid, cssArea.value);
+    await persistAll();
+    setStatus("Note type saved.");
+    renderNoteTypes();
+  };
+
+  show(
+    el("div", { class: "crumbs", onclick: renderNoteTypes }, "← Note types"),
+    el("h2", {}, `Edit note type${isCloze ? " (Cloze)" : ""}`),
+    el("div", { class: "form" },
+      el("label", {}, "Name", nameInput),
+      el("h3", {}, "Fields"), fieldsBox,
+      el("button", { onclick: async () => {
+        const name = prompt("Field name:");
+        if (!name || !name.trim()) return;
+        state.col.addField(mid, name.trim()); await persistAll(); renderEditNoteType(mid);
+      } }, "+ Field"),
+      el("h3", {}, "Templates"), tmplBox,
+      isCloze ? "" : el("button", { onclick: async () => {
+        const back = nt.flds[1]?.name ?? nt.flds[0].name;
+        state.col.addTemplate(mid, `Card ${nt.tmpls.length + 1}`, `{{${nt.flds[0].name}}}`, `{{FrontSide}}<hr id=answer>{{${back}}}`);
+        await persistAll(); renderEditNoteType(mid);
+      } }, "+ Template"),
+      el("h3", {}, "Styling (CSS)"), cssArea,
+      el("div", { class: "row" }, el("button", { onclick: save }, "Save")),
+    ),
+  );
+}
+
 // --- stats ---
 
 function barChart(values, color, height = 90) {
@@ -602,6 +708,7 @@ function wireHeader() {
   document.getElementById("btn-add").addEventListener("click", renderAddCard);
   document.getElementById("btn-browse").addEventListener("click", () => renderBrowse(state.browseQuery ?? ""));
   document.getElementById("btn-stats").addEventListener("click", renderStats);
+  document.getElementById("btn-types").addEventListener("click", renderNoteTypes);
   document.getElementById("btn-undo").addEventListener("click", doUndo);
   const fileInput = document.getElementById("file-import");
   document.getElementById("btn-import").addEventListener("click", () => fileInput.click());

@@ -141,6 +141,13 @@ main h3 { margin: 18px 0 4px; font-size: 15px; color: var(--muted); }
 /* Add-card form */
 .form { display: flex; flex-direction: column; gap: 12px; }
 .form-fields { display: flex; flex-direction: column; gap: 12px; }
+.form textarea.mono, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.nt-list { display: flex; flex-direction: column; gap: 8px; }
+.nt-row { display: flex; gap: 8px; align-items: center; }
+.nt-row input { flex: 1; }
+.nt-tmpl { border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.nt-tmpl-head { display: flex; gap: 8px; align-items: center; }
+.nt-tmpl-head input { flex: 1; font-weight: 600; }
 .form label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
 .form input, .form textarea, .form select {
   background: var(--panel-2); color: var(--text);

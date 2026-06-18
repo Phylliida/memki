@@ -426,6 +426,92 @@ export class Collection {
   noteType(mid) {
     return this.models[String(mid)] ?? null;
   }
+
+  /** Notes of a given note type. */
+  notesOfType(mid) {
+    return [...this.notes.values()].filter((n) => n.mid === mid);
+  }
+
+  // --- note-type editing (migrates affected notes/cards) ---
+
+  /** Create a Standard or Cloze note type. */
+  addNoteType(name, kind = NoteTypeKind.Standard) {
+    const id = this.nextId();
+    const nt = kind === NoteTypeKind.Cloze ? clozeNoteType(id, name) : basicNoteType(id, name);
+    this.models[String(id)] = nt;
+    return nt;
+  }
+
+  renameField(mid, ord, name) {
+    const f = this.noteType(mid)?.flds[ord];
+    if (f) f.name = name;
+  }
+
+  /** Append a field to a note type; existing notes get a trailing empty field. */
+  addField(mid, name) {
+    const nt = this.noteType(mid);
+    if (!nt) return;
+    nt.flds.push(mkField(name, nt.flds.length));
+    for (const note of this.notesOfType(mid)) note.fields.push("");
+  }
+
+  /** Remove a field (and that field's value from every note), reindexing. */
+  removeField(mid, ord) {
+    const nt = this.noteType(mid);
+    if (!nt || nt.flds.length <= 1) return;
+    nt.flds.splice(ord, 1);
+    nt.flds.forEach((f, i) => { f.ord = i; });
+    if ((nt.sortf ?? 0) >= nt.flds.length) nt.sortf = 0;
+    for (const note of this.notesOfType(mid)) {
+      note.fields.splice(ord, 1);
+      note.normalize(nt.sortf ?? 0);
+    }
+  }
+
+  setTemplate(mid, ord, { name, qfmt, afmt } = {}) {
+    const t = this.noteType(mid)?.tmpls[ord];
+    if (!t) return;
+    if (name != null) t.name = name;
+    if (qfmt != null) t.qfmt = qfmt;
+    if (afmt != null) t.afmt = afmt;
+  }
+
+  /** Add a template to a Standard note type; generates a card per existing note. */
+  addTemplate(mid, name, qfmt, afmt) {
+    const nt = this.noteType(mid);
+    if (!nt || nt.type === NoteTypeKind.Cloze) return;
+    const ord = nt.tmpls.length;
+    nt.tmpls.push(mkTemplate(name, ord, qfmt, afmt));
+    for (const note of this.notesOfType(mid)) {
+      const did = this.cardsForNote(note.id)[0]?.did ?? 1;
+      const due = this.conf.nextPos ?? 1;
+      this.conf.nextPos = due + 1;
+      this.addCard(new Card({ nid: note.id, did, ord, due, type: CardType.New, queue: CardQueue.New }));
+    }
+  }
+
+  /** Remove a template (and its cards), shifting higher ordinals down. */
+  removeTemplate(mid, ord) {
+    const nt = this.noteType(mid);
+    if (!nt || nt.type === NoteTypeKind.Cloze || nt.tmpls.length <= 1) return;
+    nt.tmpls.splice(ord, 1);
+    nt.tmpls.forEach((t, i) => { t.ord = i; });
+    for (const c of [...this.cards.values()]) {
+      const note = this.notes.get(c.nid);
+      if (!note || note.mid !== mid) continue;
+      if (c.ord === ord) {
+        this.cards.delete(c.id);
+        this.graves.push({ usn: -1, oid: c.id, type: 0 });
+      } else if (c.ord > ord) {
+        c.ord -= 1;
+      }
+    }
+  }
+
+  setCss(mid, css) {
+    const nt = this.noteType(mid);
+    if (nt) nt.css = css;
+  }
   /** Sort-field index for a note type (defaults to 0). */
   sortFieldIndex(mid) {
     return this.noteType(mid)?.sortf ?? 0;

@@ -139,6 +139,36 @@ test("deck management: add, rename (with subdecks), delete (with cards)", () => 
   assert.ok(col.decks["1"]);
 });
 
+test("note-type editing migrates notes and cards", () => {
+  const col = Collection.createDefault();
+  const nt = col.addNoteType("Vocab", 0);
+  const note = new Note({ mid: nt.id, fields: ["a", "b"] }).normalize();
+  col.addNote(note);
+  col.addCard(new Card({ nid: note.id, did: 1, ord: 0 }));
+
+  // Add a field → notes gain a trailing empty field.
+  col.addField(nt.id, "Notes");
+  assert.equal(nt.flds.length, 3);
+  assert.deepEqual(col.notes.get(note.id).fields, ["a", "b", ""]);
+
+  // Remove the middle field → values splice out, ords reindex.
+  col.removeField(nt.id, 1);
+  assert.deepEqual(nt.flds.map((f) => f.name), ["Front", "Notes"]);
+  assert.deepEqual(col.notes.get(note.id).fields, ["a", ""]);
+
+  // Add a template → a card is generated per note.
+  col.addTemplate(nt.id, "Card 2", "{{Front}}", "{{Notes}}");
+  assert.equal(col.cardsForNote(note.id).length, 2);
+  assert.deepEqual(col.cardsForNote(note.id).map((c) => c.ord).sort(), [0, 1]);
+
+  // Remove template 0 → its card goes, the other shifts to ord 0.
+  col.removeTemplate(nt.id, 0);
+  const cards = col.cardsForNote(note.id);
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].ord, 0);
+  assert.equal(nt.tmpls.length, 1);
+});
+
 test("Revlog row round-trips in column order", () => {
   const r = new Revlog({ id: 1700000000000, cid: 42, ease: 3, ivl: 4, lastIvl: 1, factor: 2500, time: 1234, type: 0 });
   assert.deepEqual(Revlog.fromRow(r.toRow()), r);
