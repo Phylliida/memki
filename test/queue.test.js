@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 
 import { Scheduler } from "../src/scheduler.js";
 import { Collection, Note, Card, CardType, CardQueue } from "../src/model.js";
+import { Rating } from "../src/fsrs.js";
 import { nowSec } from "../src/ids.js";
 
 function collectionWithDeck() {
@@ -47,6 +48,19 @@ test("per-day new limit caps the new queue", () => {
   for (let i = 0; i < 5; i++) addCard(col, { type: CardType.New, queue: CardQueue.New, due: i });
   const sched = new Scheduler(col);
   assert.equal(sched.counts(1).new, 2);
+});
+
+test("daily new limit tapers as cards are studied today", () => {
+  const col = collectionWithDeck();
+  col.dconf["1"].new.perDay = 2;
+  for (let i = 0; i < 5; i++) addCard(col, { type: CardType.New, queue: CardQueue.New, due: i });
+  const sched = new Scheduler(col);
+  assert.equal(sched.counts(1).new, 2);
+
+  const toStudy = sched.queue(1).new;
+  sched.answerCard(toStudy[0], Rating.Good);
+  sched.answerCard(toStudy[1], Rating.Good);
+  assert.equal(sched.counts(1).new, 0); // daily cap reached
 });
 
 test("subdeck cards are included when studying the parent", () => {

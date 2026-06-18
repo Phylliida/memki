@@ -501,8 +501,8 @@ export class Scheduler {
 
   /**
    * Gather the cards due now in a deck (and its subdecks), grouped and capped at
-   * the deck's per-day new/review limits. Simplified vs Anki: it does not
-   * subtract cards already studied earlier today, and uses a fixed study order
+   * the deck's per-day new/review limits minus what's already been studied today
+   * (tracked in the deck's newToday/revToday counters). Uses a fixed study order
    * (due learning, then reviews, then new).
    * @returns {{ learning: Card[], review: Card[], new: Card[], all: Card[] }}
    */
@@ -536,12 +536,45 @@ export class Scheduler {
     const dc = this.deckConfigFor({ did: deckId });
     const newPerDay = dc.new?.perDay ?? 20;
     const revPerDay = dc.rev?.perDay ?? 200;
-    const cappedReview = review.slice(0, revPerDay);
-    const cappedNew = newCards.slice(0, newPerDay);
+    // Subtract cards already studied today (deck counters track the deck+subdecks).
+    const deck = this.col.decks[String(deckId)];
+    const newDone = deck ? this._counterValue(deck, "newToday") : 0;
+    const revDone = deck ? this._counterValue(deck, "revToday") : 0;
+    const cappedNew = newCards.slice(0, Math.max(0, newPerDay - newDone));
+    const cappedReview = review.slice(0, Math.max(0, revPerDay - revDone));
     return {
       learning, review: cappedReview, new: cappedNew,
       all: [...learning, ...cappedReview, ...cappedNew],
     };
+  }
+
+  /** Read a deck's [dayStamp, count] counter, treating stale stamps as 0. */
+  _counterValue(deck, key) {
+    const c = deck[key];
+    return Array.isArray(c) && c[0] === this.daysElapsed ? c[1] : 0;
+  }
+
+  /** Increment a deck's daily counter, resetting it if the day rolled over. */
+  _bumpCounter(deck, key) {
+    const c = deck[key];
+    if (Array.isArray(c) && c[0] === this.daysElapsed) c[1] += 1;
+    else deck[key] = [this.daysElapsed, 1];
+  }
+
+  /** Count a studied card against its deck + ancestors' new/review daily totals. */
+  _bumpStudyCounters(did, kind) {
+    const key = kind === "new" ? "newToday" : kind === "review" ? "revToday" : null;
+    if (!key) return; // learning/relearning steps don't consume the daily caps
+    const deck = this.col.decks[String(did)];
+    if (!deck) return;
+    this._bumpCounter(deck, key);
+    const parts = deck.name.split("::");
+    for (let i = 1; i < parts.length; i++) {
+      const anc = this.col.decks[
+        Object.keys(this.col.decks).find((id) => this.col.decks[id].name === parts.slice(0, i).join("::"))
+      ];
+      if (anc) this._bumpCounter(anc, key);
+    }
   }
 
   /** Due counts for a deck (and subdecks): { new, learning, review }. */
@@ -576,6 +609,7 @@ export class Scheduler {
     const lastInterval = asRevlogInterval(intervalKindOf(current));
     card.reps += 1;
     if (this.fsrsEnabled) card.desiredRetention = this.desiredRetentionFor(this.deckConfigFor(card));
+    this._bumpStudyCounters(card.did, current.kind); // count against daily new/review caps
     this._applyState(card, next);
     if (stateLeeched(next) && (this.deckConfigFor(card).lapse?.leechAction ?? 0) === 0) {
       card.queue = CardQueue.Suspended;

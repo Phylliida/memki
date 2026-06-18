@@ -298,6 +298,7 @@ async function gradeCard(rating) {
   const entry = sched.answerCard(card, rating);
   await putCard(state.db, card);
   await putRevlog(state.db, entry);
+  await putMeta(state.db, state.col); // persist deck daily counters (newToday/revToday)
   renderStudy();
 }
 
