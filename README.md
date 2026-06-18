@@ -23,8 +23,20 @@ Early. Building the core library first.
 | `.apkg` / `.colpkg` import (read real collections) | ✅ reads a real deck; recomputed csum/sfld match Anki |
 | `.apkg` export (write real collections) | ✅ schema-v11; real deck round-trips import→export→import |
 | Scheduler (v3: SM-2 + FSRS card lifecycle) | ✅ matches rslib state-machine vectors; answer-card flow + revlog |
-| IndexedDB persistence | ⬜ planned |
-| Browser UI | ⬜ planned |
+| Template renderer + due-queue builder | ✅ `{{Field}}`/conditionals/`FrontSide`; per-deck due queue + counts |
+| IndexedDB persistence | ✅ save/load whole collection + incremental card/revlog + media |
+| Browser study UI (`web/`) | ✅ deck list, study with 4 buttons, add card, import/export `.apkg` |
+
+## Run the app
+
+```bash
+npm run serve   # static server on :8000 (python3 -m http.server)
+# then open http://localhost:8000/web/
+```
+
+The study app (create/add cards, study, persistence) runs fully offline. `.apkg`
+import/export lazily loads sql.js + fflate + fzstd from a CDN (see the import map
+in `web/index.html`).
 
 ## Usage
 

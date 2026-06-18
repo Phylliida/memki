@@ -20,7 +20,8 @@
     "./sqljs-node": "./src/sqljs-node.js"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "serve": "python3 -m http.server 8000"
   },
   "files": [
     "src"

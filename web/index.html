@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>oss-anki</title>
+  <!--
+    Import map so the .apkg interop module's bare imports (fflate/fzstd) and
+    sql.js resolve in the browser without a build step. These are only fetched
+    when you import/export a deck; the core study app runs fully offline.
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "fflate": "https://cdn.jsdelivr.net/npm/fflate@0.8.3/+esm",
+      "fzstd": "https://cdn.jsdelivr.net/npm/fzstd@0.1.1/+esm",
+      "sql.js": "https://esm.sh/sql.js@1.14.1"
+    }
+  }
+  </script>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header>
+    <h1>oss-anki</h1>
+    <div class="actions">
+      <button id="btn-add">+ Card</button>
+      <button id="btn-import">Import .apkg</button>
+      <button id="btn-export">Export .apkg</button>
+      <input id="file-import" type="file" accept=".apkg,.colpkg" hidden />
+    </div>
+  </header>
+
+  <main id="view"></main>
+
+  <footer>
+    <span id="status"></span>
+    <span class="grow"></span>
+    <span class="muted">FSRS-6 · schema v11 · local-first</span>
+  </footer>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
