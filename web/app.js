@@ -165,7 +165,7 @@ function showAnswer() {
   const outcomes = sched.nextStates(card);
 
   const ratingBtn = (label, cls, rating) =>
-    el("button", { class: `rate ${cls}`, onclick: () => answer(rating) },
+    el("button", { class: `rate ${cls}`, onclick: () => gradeCard(rating) },
       el("span", {}, label),
       el("small", {}, formatInterval(outcomes[cls].interval)),
     );
@@ -182,7 +182,7 @@ function showAnswer() {
   );
 }
 
-async function answer(rating) {
+async function gradeCard(rating) {
   const card = state.card;
   const sched = new Scheduler(state.col);
   const entry = sched.answerCard(card, rating);
