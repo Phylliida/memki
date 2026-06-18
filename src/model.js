@@ -359,6 +359,15 @@ export class Collection {
     return [...this.cards.values()].filter((c) => c.nid === noteId);
   }
 
+  /** Create a filtered (dynamic) deck. Returns the deck. */
+  createFilteredDeck(name) {
+    const id = this.nextId();
+    const d = defaultDeck(id, name);
+    d.dyn = 1;
+    this.decks[String(id)] = d;
+    return d;
+  }
+
   /** Create a deck (name may contain "::" for subdecks). Returns the deck. */
   addDeck(name) {
     const existing = Object.values(this.decks).find((d) => d.name === name);

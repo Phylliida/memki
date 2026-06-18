@@ -94,6 +94,36 @@ test("learn-ahead surfaces near-due learning cards (after everything else)", () 
   assert.ok(q.all.some((c) => c.id === ahead.id)); // but reachable via learn-ahead
 });
 
+test("filtered deck: build gathers cards, study reschedules, empty returns them", () => {
+  const col = collectionWithDeck();
+  // two review cards not due for a long time
+  const a = addCard(col, { type: CardType.Review, queue: CardQueue.Review, ivl: 30, factor: 2500, due: 9_000_000 });
+  const b = addCard(col, { type: CardType.Review, queue: CardQueue.Review, ivl: 30, factor: 2500, due: 9_000_000 });
+  const fd = col.createFilteredDeck("Cram");
+  const sched = new Scheduler(col);
+
+  // Build: both cards move into the filtered deck, becoming due now.
+  assert.equal(sched.buildFiltered(fd.id, () => true), 2);
+  assert.equal(a.did, fd.id);
+  assert.equal(a.odid, 1);
+  assert.equal(a.odue, 9_000_000);
+  assert.equal(a.due, sched.daysElapsed);
+
+  // They're studyable in the filtered deck (no per-day cap).
+  assert.equal(sched.queue(fd.id).all.length, 2);
+
+  // Answer one → rescheduled (odue cleared so its new schedule sticks).
+  sched.answerCard(a, Rating.Good);
+  assert.equal(a.odue, 0);
+
+  // Empty: both return home; the unreviewed one restores its original due.
+  sched.emptyFiltered(fd.id);
+  assert.equal(a.did, 1);
+  assert.equal(a.odid, 0);
+  assert.equal(b.did, 1);
+  assert.equal(b.due, 9_000_000); // unreviewed → restored
+});
+
 test("subdeck cards are included when studying the parent", () => {
   const col = collectionWithDeck();
   // Add a child deck "Default::Child".

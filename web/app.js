@@ -2,7 +2,7 @@
 // Core study/persistence runs fully offline; .apkg import/export lazily loads
 // sql.js + fflate + fzstd from the CDN (see the import map in index.html).
 
-import { Collection, Note, Card, NoteTypeKind } from "../src/model.js";
+import { Collection, Note, Card, NoteTypeKind, CardType } from "../src/model.js";
 import { Scheduler } from "../src/scheduler.js";
 import { renderCard, clozeNumbers } from "../src/template.js";
 import { collectionStats } from "../src/stats.js";
@@ -187,6 +187,69 @@ function deleteDeckPrompt(deck) {
   persistAll().then(renderDecks);
 }
 
+function emptyFilteredDeck(deck) {
+  const sched = new Scheduler(state.col);
+  sched.emptyFiltered(deck.id);
+  delete state.col.decks[String(deck.id)];
+  state.col.graves.push({ usn: -1, oid: deck.id, type: 2 });
+  persistAll().then(renderDecks);
+}
+
+function renderCustomStudy(sourceDeckId) {
+  state.card = null;
+  const decks = Object.values(state.col.decks).filter((d) => !d.dyn);
+  const deckSel = el("select", {}, ...decks.map((d) => el("option", { value: d.id }, d.name)));
+  deckSel.value = String(sourceDeckId ?? decks[0]?.id ?? 1);
+  const presetSel = el("select", {},
+    el("option", { value: "ahead" }, "Review ahead — cards due in the next N days"),
+    el("option", { value: "all" }, "All cards in deck (ignore limits)"),
+    el("option", { value: "search" }, "Cards matching a search"),
+  );
+  const nInput = el("input", { type: "number", value: "7", min: "1" });
+  const searchInput = el("input", { type: "text", placeholder: "search text (fields/tags)" });
+
+  const build = async () => {
+    const sched = new Scheduler(state.col, { fuzz: true });
+    const srcIds = sched._deckAndDescendants(Number(deckSel.value));
+    const today = sched.daysElapsed;
+    const preset = presetSel.value;
+    const n = Math.max(1, Number(nInput.value) || 7);
+    const q = searchInput.value.trim().toLowerCase();
+    const match = (card) => {
+      if (!srcIds.has(card.did)) return false;
+      if (preset === "ahead") return card.type === CardType.Review && card.due > today && card.due <= today + n;
+      if (preset === "search") {
+        const note = state.col.notes.get(card.nid);
+        return `${note.fields.join(" ")} ${note.tags.join(" ")}`.toLowerCase().includes(q);
+      }
+      return true; // all
+    };
+    const fd = state.col.createFilteredDeck("Custom Study");
+    const count = sched.buildFiltered(fd.id, match);
+    if (count === 0) {
+      delete state.col.decks[String(fd.id)];
+      setStatus("No matching cards found.");
+      return;
+    }
+    await persistAll();
+    setStatus(`Custom study: ${count} cards gathered.`);
+    startStudy(fd.id);
+  };
+
+  show(
+    el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
+    el("h2", {}, "Custom Study"),
+    el("div", { class: "form" },
+      el("label", {}, "Deck", deckSel),
+      el("label", {}, "What to study", presetSel),
+      el("label", {}, "Days ahead (for 'review ahead')", nInput),
+      el("label", {}, "Search (for 'matching a search')", searchInput),
+      el("p", { class: "muted" }, "Builds a temporary filtered deck. Empty it from the deck list (⏏) to return cards to their home decks."),
+      el("div", { class: "row" }, el("button", { onclick: build }, "Build & Study")),
+    ),
+  );
+}
+
 function renderDecks() {
   state.deckId = null;
   state.card = null;
@@ -196,11 +259,15 @@ function renderDecks() {
     const c = sched.counts(d.id);
     const depth = d.name.split("::").length - 1;
     const leaf = d.name.split("::").pop();
-    const actions = el("span", { class: "deck-actions" },
-      el("button", { class: "icon", title: "Rename", onclick: (e) => { e.stopPropagation(); renameDeckPrompt(d); } }, "✎"),
-      Number(d.id) === 1 ? "" :
-        el("button", { class: "icon", title: "Delete", onclick: (e) => { e.stopPropagation(); deleteDeckPrompt(d); } }, "🗑"),
-    );
+    const actions = d.dyn
+      ? el("span", { class: "deck-actions" },
+          el("button", { class: "icon", title: "Empty (return cards home)", onclick: (e) => { e.stopPropagation(); emptyFilteredDeck(d); } }, "⏏"))
+      : el("span", { class: "deck-actions" },
+          el("button", { class: "icon", title: "Custom study", onclick: (e) => { e.stopPropagation(); renderCustomStudy(d.id); } }, "⚡"),
+          el("button", { class: "icon", title: "Rename", onclick: (e) => { e.stopPropagation(); renameDeckPrompt(d); } }, "✎"),
+          Number(d.id) === 1 ? "" :
+            el("button", { class: "icon", title: "Delete", onclick: (e) => { e.stopPropagation(); deleteDeckPrompt(d); } }, "🗑"),
+        );
     const row = el("div", { class: "deck", onclick: () => startStudy(d.id) },
       el("span", { class: "name", style: `padding-left:${depth * 18}px` }, leaf),
       el("span", { class: "count new", title: "new" }, c.new),

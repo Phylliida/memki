@@ -410,7 +410,9 @@ export class Scheduler {
 
   /** Resolve the deck options group (dconf) for a card's deck. */
   deckConfigFor(card) {
-    const deck = this.col.decks[String(card.did)];
+    let deck = this.col.decks[String(card.did)];
+    // Filtered decks use the card's original (home) deck options.
+    if (deck?.dyn && card.odid) deck = this.col.decks[String(card.odid)] ?? deck;
     const dcId = deck && deck.conf != null ? String(deck.conf) : "1";
     return this.col.dconf[dcId] ?? this.col.dconf["1"] ?? {};
   }
@@ -536,13 +538,14 @@ export class Scheduler {
     review.sort(byDue);
     newCards.sort(byDue);
 
-    const dc = this.deckConfigFor({ did: deckId });
-    const newPerDay = dc.new?.perDay ?? 20;
-    const revPerDay = dc.rev?.perDay ?? 200;
-    // Subtract cards already studied today (deck counters track the deck+subdecks).
     const deck = this.col.decks[String(deckId)];
-    const newDone = deck ? this._counterValue(deck, "newToday") : 0;
-    const revDone = deck ? this._counterValue(deck, "revToday") : 0;
+    const isDyn = !!deck?.dyn;
+    // Filtered decks ignore per-day limits and "studied today" counters.
+    const dc = this.deckConfigFor({ did: deckId });
+    const newPerDay = isDyn ? Infinity : (dc.new?.perDay ?? 20);
+    const revPerDay = isDyn ? Infinity : (dc.rev?.perDay ?? 200);
+    const newDone = isDyn || !deck ? 0 : this._counterValue(deck, "newToday");
+    const revDone = isDyn || !deck ? 0 : this._counterValue(deck, "revToday");
     const cappedNew = newCards.slice(0, Math.max(0, newPerDay - newDone));
     const cappedReview = review.slice(0, Math.max(0, revPerDay - revDone));
     return {
@@ -582,6 +585,42 @@ export class Scheduler {
       if ((sib.queue === CardQueue.New && buryNew) || (sib.queue === CardQueue.Review && buryRev)) {
         sib.queue = CardQueue.SchedBuried;
       }
+    }
+  }
+
+  // --- filtered (dynamic) decks ---
+
+  /**
+   * Gather cards matching `matchFn` into a filtered deck (reschedule mode):
+   * remembers each card's home deck (odid) and, for review cards, its due
+   * (odue) before making it due now. Returns the number of cards gathered.
+   */
+  buildFiltered(filteredDeckId, matchFn) {
+    let count = 0;
+    for (const card of this.col.cards.values()) {
+      if (card.odid) continue;             // already in a filtered deck
+      if (card.did === filteredDeckId) continue;
+      if (card.queue === CardQueue.Suspended) continue;
+      if (card.queue === CardQueue.UserBuried || card.queue === CardQueue.SchedBuried) continue;
+      if (!matchFn(card)) continue;
+      card.odid = card.did;
+      card.did = filteredDeckId;
+      if (card.type === CardType.Review) {
+        card.odue = card.due;
+        card.due = this.daysElapsed; // make it due today inside the filtered deck
+      }
+      count++;
+    }
+    return count;
+  }
+
+  /** Return a filtered deck's cards to their home decks (restoring unreviewed due). */
+  emptyFiltered(filteredDeckId) {
+    for (const card of this.col.cards.values()) {
+      if (card.did !== filteredDeckId || !card.odid) continue;
+      card.did = card.odid;
+      card.odid = 0;
+      if (card.odue) { card.due = card.odue; card.odue = 0; } // unreviewed: restore due
     }
   }
 
@@ -653,6 +692,7 @@ export class Scheduler {
     }
     card.mod = this.now;
     card.usn = -1;
+    if (card.odid) card.odue = 0; // answered inside a filtered deck → rescheduled, don't restore
     this._burySiblings(card); // hide other cards of the same note until tomorrow
 
     const entry = new Revlog({
