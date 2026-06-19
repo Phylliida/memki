@@ -1194,19 +1194,35 @@ async function loadSql() {
 }
 
 async function doImport(file) {
+  // Merge into the current collection (add new + update by GUID) unless the
+  // user chooses to replace everything.
+  const merge = state.col.cards.size > 0
+    ? confirm("Merge this deck into your current collection?\n\nOK = merge (add new cards, update existing by GUID)\nCancel = replace your entire collection")
+    : false;
   setStatus("Importing…");
   try {
     const { importPackage } = await import("../src/apkg.js");
     const SQL = await loadSql();
     const buf = new Uint8Array(await file.arrayBuffer());
     const { collection, media } = importPackage(buf, { SQL });
-    state.col = collection;
-    state.media = media;
-    state.mediaUrls.clear();
-    await clearAll(state.db);
-    await saveCollection(state.db, collection);
-    await saveMedia(state.db, media);
-    setStatus(`Imported ${collection.cards.size} cards.`);
+
+    if (merge) {
+      const { mergeCollection } = await import("../src/merge.js");
+      const r = mergeCollection(state.col, collection);
+      for (const [name, bytes] of media) state.media.set(name, bytes);
+      state.mediaUrls.clear();
+      await saveCollection(state.db, state.col);
+      await saveMedia(state.db, media);
+      setStatus(`Merged: ${r.added} added, ${r.updated} updated.`);
+    } else {
+      state.col = collection;
+      state.media = media;
+      state.mediaUrls.clear();
+      await clearAll(state.db);
+      await saveCollection(state.db, collection);
+      await saveMedia(state.db, media);
+      setStatus(`Imported ${collection.cards.size} cards.`);
+    }
     renderDecks();
   } catch (e) {
     setStatus(`Import failed: ${e.message}`);
