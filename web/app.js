@@ -7,6 +7,7 @@ import { Scheduler } from "../src/scheduler.js";
 import { renderCard, clozeNumbers } from "../src/template.js";
 import { collectionStats } from "../src/stats.js";
 import { compileSearch, searchContext } from "../src/search.js";
+import { parseCsv } from "../src/csv.js";
 import { Rating } from "../src/fsrs.js";
 import { stripHtml } from "../src/text.js";
 import {
@@ -47,6 +48,59 @@ function el(tag, attrs = {}, ...kids) {
 function show(...nodes) {
   const v = view();
   v.replaceChildren(...nodes);
+}
+
+// --- rich-text field editor (contenteditable + native formatting, like Anki) ---
+
+function tbBtn(label, title, onClick) {
+  return el("button", { type: "button", class: "rich-tb", title, onclick: (e) => { e.preventDefault(); onClick(); } }, label);
+}
+
+/** A rich-text editor over a field's HTML. Returns { el, getHTML, setHTML, focus }. */
+function richEditor(initialHtml = "") {
+  const area = el("div", { class: "rich", contenteditable: "true" });
+  area.innerHTML = initialHtml;
+  const raw = el("textarea", { class: "rich-raw mono" });
+  raw.style.display = "none";
+  let rawMode = false;
+
+  const cmd = (c, val = null) => { area.focus(); document.execCommand(c, false, val); };
+  const wrapCloze = () => {
+    if (rawMode) return;
+    area.focus();
+    const sel = window.getSelection();
+    const text = sel && !sel.isCollapsed ? sel.toString() : "";
+    let max = 0; let m;
+    const re = /\{\{c(\d+)::/g;
+    while ((m = re.exec(area.innerHTML))) max = Math.max(max, Number(m[1]));
+    document.execCommand("insertText", false, `{{c${max + 1}::${text}}}`);
+  };
+  const toggleRaw = () => {
+    rawMode = !rawMode;
+    if (rawMode) { raw.value = area.innerHTML; raw.style.display = ""; area.style.display = "none"; }
+    else { area.innerHTML = raw.value; raw.style.display = "none"; area.style.display = ""; }
+  };
+
+  area.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "c") { e.preventDefault(); wrapCloze(); }
+  });
+
+  const toolbar = el("div", { class: "rich-toolbar" },
+    tbBtn("B", "Bold", () => cmd("bold")),
+    tbBtn("I", "Italic", () => cmd("italic")),
+    tbBtn("U", "Underline", () => cmd("underline")),
+    tbBtn("•", "Bullet list", () => cmd("insertUnorderedList")),
+    tbBtn("1.", "Numbered list", () => cmd("insertOrderedList")),
+    tbBtn("T̶", "Clear formatting", () => cmd("removeFormat")),
+    tbBtn("[…]", "Cloze (Ctrl+Shift+C)", wrapCloze),
+    tbBtn("</>", "Edit HTML", toggleRaw),
+  );
+  return {
+    el: el("div", { class: "rich-wrap" }, toolbar, area, raw),
+    getHTML: () => (rawMode ? raw.value : area.innerHTML),
+    setHTML: (h) => { area.innerHTML = h; raw.value = h; },
+    focus: () => area.focus(),
+  };
 }
 
 // --- media ---
@@ -418,10 +472,32 @@ async function doUndo() {
   renderStudy();
 }
 
+/**
+ * Create a note + its cards (cloze → one per cloze number; else one per
+ * template) in the collection, returning the note. Does not persist.
+ */
+function addNoteWithCards(model, fields, did, tags = []) {
+  const note = new Note({ mid: model.id, fields, tags }).normalize(model.sortf ?? 0);
+  state.col.addNote(note);
+  let ords;
+  if (model.type === NoteTypeKind.Cloze) {
+    const nums = [...clozeNumbers(fields[0] ?? "")].sort((a, b) => a - b);
+    ords = (nums.length ? nums : [1]).map((n) => n - 1);
+  } else {
+    ords = model.tmpls.map((t) => t.ord);
+  }
+  for (const ord of ords) {
+    const due = state.col.conf.nextPos ?? 1;
+    state.col.conf.nextPos = due + 1;
+    state.col.addCard(new Card({ nid: note.id, did, ord, due }));
+  }
+  return note;
+}
+
 function renderAddCard() {
   state.card = null;
   const models = Object.values(state.col.models);
-  const decks = Object.values(state.col.decks);
+  const decks = Object.values(state.col.decks).filter((d) => !d.dyn);
   const modelSel = el("select", {}, ...models.map((m) => el("option", { value: m.id }, m.name)));
   if (state.col.conf.curModel) modelSel.value = state.col.conf.curModel;
   const deckSel = el("select", {}, ...decks.map((d) => el("option", { value: d.id }, d.name)));
@@ -432,9 +508,9 @@ function renderAddCard() {
     const model = state.col.noteType(Number(modelSel.value));
     inputs = [];
     fieldsWrap.replaceChildren(...model.flds.map((f) => {
-      const ta = el("textarea", { placeholder: f.name });
-      inputs.push(ta);
-      return el("label", {}, f.name, ta);
+      const ed = richEditor("");
+      inputs.push(ed);
+      return el("label", {}, f.name, ed.el);
     }));
   };
   modelSel.addEventListener("change", rebuildFields);
@@ -442,27 +518,13 @@ function renderAddCard() {
 
   const save = async () => {
     const model = state.col.noteType(Number(modelSel.value));
-    const fields = inputs.map((ta) => ta.value);
-    if (!fields[0].trim()) { setStatus("The first field is empty."); return; }
-    const note = new Note({ mid: model.id, fields }).normalize(model.sortf ?? 0);
-    state.col.addNote(note);
-
-    // Cloze notes generate one card per distinct cloze number; otherwise one per template.
-    let ords;
-    if (model.type === NoteTypeKind.Cloze) {
-      const nums = [...clozeNumbers(fields[0])].sort((a, b) => a - b);
-      ords = (nums.length ? nums : [1]).map((n) => n - 1);
-    } else {
-      ords = model.tmpls.map((t) => t.ord);
-    }
-    for (const ord of ords) {
-      const due = state.col.conf.nextPos ?? 1;
-      state.col.conf.nextPos = due + 1;
-      const card = state.col.addCard(new Card({ nid: note.id, did: Number(deckSel.value), ord, due }));
-      await putCard(state.db, card);
-    }
+    const fields = inputs.map((ed) => ed.getHTML());
+    if (!stripHtml(fields[0]).trim()) { setStatus("The first field is empty."); return; }
+    const note = addNoteWithCards(model, fields, Number(deckSel.value));
     await putNoteAndMeta(note);
-    setStatus(`Added (${ords.length} card${ords.length > 1 ? "s" : ""}).`);
+    for (const c of state.col.cardsForNote(note.id)) await putCard(state.db, c);
+    const count = state.col.cardsForNote(note.id).length;
+    setStatus(`Added (${count} card${count > 1 ? "s" : ""}).`);
     renderDecks();
   };
 
@@ -475,7 +537,8 @@ function renderAddCard() {
       fieldsWrap,
       el("div", { class: "row" },
         el("button", { onclick: save }, "Save"),
-        el("button", { class: "icon", onclick: renderImageOcclusion, title: "Create image-occlusion cards" }, "🖼 Image Occlusion"),
+        el("button", { onclick: renderImportCsv }, "Import CSV/TSV"),
+        el("button", { onclick: renderImageOcclusion }, "🖼 Image Occlusion"),
       ),
     ),
   );
@@ -484,6 +547,93 @@ function renderAddCard() {
 async function putNoteAndMeta(note) {
   await putNote(state.db, note);
   await putMeta(state.db, state.col);
+}
+
+function renderImportCsv() {
+  state.card = null;
+  const models = Object.values(state.col.models);
+  const decks = Object.values(state.col.decks).filter((d) => !d.dyn);
+  const fileInput = el("input", { type: "file", accept: ".csv,.tsv,.txt" });
+  const modelSel = el("select", {}, ...models.map((m) => el("option", { value: m.id }, m.name)));
+  if (state.col.conf.curModel) modelSel.value = state.col.conf.curModel;
+  const deckSel = el("select", {}, ...decks.map((d) => el("option", { value: d.id }, d.name)));
+  const delimSel = el("select", {},
+    el("option", { value: "" }, "Auto"), el("option", { value: "," }, "Comma"),
+    el("option", { value: "\t" }, "Tab"), el("option", { value: ";" }, "Semicolon"));
+  const headerChk = el("input", { type: "checkbox" });
+  headerChk.checked = true;
+  const mappingBox = el("div", { class: "form" });
+  const preview = el("div", { class: "muted io-preview" });
+  let parsed = null;
+  const mapSelects = [];
+
+  const buildMapping = () => {
+    mapSelects.length = 0;
+    mappingBox.replaceChildren();
+    if (!parsed || !parsed.rows.length) return;
+    const cols = Math.max(...parsed.rows.map((r) => r.length));
+    const header = headerChk.checked ? parsed.rows[0] : null;
+    const colLabel = (i) => (header && header[i] ? `Col ${i + 1} — ${header[i]}` : `Col ${i + 1}`);
+    const model = state.col.noteType(Number(modelSel.value));
+    mappingBox.replaceChildren(...model.flds.map((f, fi) => {
+      const sel = el("select", {},
+        el("option", { value: -1 }, "(empty)"),
+        ...Array.from({ length: cols }, (_, i) => el("option", { value: i }, colLabel(i))));
+      sel.value = String(fi < cols ? fi : -1);
+      mapSelects.push(sel);
+      return el("label", {}, f.name, sel);
+    }));
+    const dataCount = parsed.rows.length - (headerChk.checked ? 1 : 0);
+    const sample = (headerChk.checked ? parsed.rows.slice(1, 4) : parsed.rows.slice(0, 3))
+      .map((r) => r.join(" | ")).join("    /    ");
+    preview.textContent = `${dataCount} rows · ${cols} columns · sample: ${sample}`;
+  };
+
+  const reparse = async () => {
+    const f = fileInput.files[0];
+    if (!f) return;
+    parsed = parseCsv(await f.text(), delimSel.value || undefined);
+    buildMapping();
+  };
+  fileInput.addEventListener("change", reparse);
+  delimSel.addEventListener("change", reparse);
+  headerChk.addEventListener("change", buildMapping);
+  modelSel.addEventListener("change", buildMapping);
+
+  const doImport = async () => {
+    if (!parsed || !parsed.rows.length) { setStatus("Choose a file first."); return; }
+    const model = state.col.noteType(Number(modelSel.value));
+    const did = Number(deckSel.value);
+    const map = mapSelects.map((s) => Number(s.value));
+    const dataRows = headerChk.checked ? parsed.rows.slice(1) : parsed.rows;
+    let n = 0;
+    for (const row of dataRows) {
+      const fields = model.flds.map((_, fi) => (map[fi] >= 0 ? row[map[fi]] ?? "" : ""));
+      if (!stripHtml(fields[0]).trim()) continue;
+      addNoteWithCards(model, fields, did);
+      n++;
+    }
+    await saveCollection(state.db, state.col);
+    setStatus(`Imported ${n} notes.`);
+    renderDecks();
+  };
+
+  show(
+    el("div", { class: "crumbs", onclick: renderAddCard }, "← Add"),
+    el("h2", {}, "Import CSV / TSV"),
+    el("div", { class: "form" },
+      el("label", {}, "File", fileInput),
+      el("div", { class: "row" }, el("label", {}, "Note type", modelSel), el("label", {}, "Deck", deckSel)),
+      el("div", { class: "row" },
+        el("label", {}, "Delimiter", delimSel),
+        el("label", { class: "inline" }, headerChk, "First row is a header"),
+      ),
+      el("h3", {}, "Column → field mapping"),
+      mappingBox,
+      preview,
+      el("div", { class: "row" }, el("button", { onclick: doImport }, "Import")),
+    ),
+  );
 }
 
 // --- browse / edit ---
@@ -546,15 +696,11 @@ function renderEditNote(noteId) {
   if (!note) return renderBrowse(state.browseQuery ?? "");
   const model = state.col.noteType(note.mid);
 
-  const inputs = model.flds.map((f) => {
-    const ta = el("textarea", {});
-    ta.value = note.fields[f.ord] ?? "";
-    return { f, ta };
-  });
+  const inputs = model.flds.map((f) => ({ f, ed: richEditor(note.fields[f.ord] ?? "") }));
   const tagsInput = el("input", { type: "text", value: (note.tags ?? []).join(" ") });
 
   const save = async () => {
-    note.fields = inputs.map(({ ta }) => ta.value);
+    note.fields = inputs.map(({ ed }) => ed.getHTML());
     note.tags = tagsInput.value.split(/\s+/).filter(Boolean);
     note.mod = Math.floor(Date.now() / 1000);
     note.normalize(model.sortf ?? 0);
@@ -575,7 +721,7 @@ function renderEditNote(noteId) {
     el("div", { class: "crumbs", onclick: () => renderBrowse(state.browseQuery ?? "") }, "← Browse"),
     el("h2", {}, `Edit (${model.name})`),
     el("div", { class: "form" },
-      ...inputs.map(({ f, ta }) => el("label", {}, f.name, ta)),
+      ...inputs.map(({ f, ed }) => el("label", {}, f.name, ed.el)),
       el("label", {}, "Tags", tagsInput),
       el("div", { class: "row" },
         el("button", { onclick: save }, "Save"),
@@ -1107,7 +1253,11 @@ function wireHeader() {
 function wireKeyboard() {
   const GRADE = { 1: Rating.Again, 2: Rating.Hard, 3: Rating.Good, 4: Rating.Easy, " ": Rating.Good, Enter: Rating.Good };
   document.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); doUndo(); return; }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      const t = e.target;
+      if (t && (t.isContentEditable || t.matches?.("input, textarea, select"))) return; // let the field undo
+      e.preventDefault(); doUndo(); return;
+    }
     if (!state.card) return; // grading shortcuts only while a card is being studied
     const inField = e.target?.matches?.("input, textarea, select");
     if (!state.answerShown) {
