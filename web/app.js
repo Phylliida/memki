@@ -265,6 +265,7 @@ function renderDecks() {
           el("button", { class: "icon", title: "Empty (return cards home)", onclick: (e) => { e.stopPropagation(); emptyFilteredDeck(d); } }, "⏏"))
       : el("span", { class: "deck-actions" },
           el("button", { class: "icon", title: "Custom study", onclick: (e) => { e.stopPropagation(); renderCustomStudy(d.id); } }, "⚡"),
+          el("button", { class: "icon", title: "Options", onclick: (e) => { e.stopPropagation(); renderDeckOptions(d.id); } }, "⚙"),
           el("button", { class: "icon", title: "Rename", onclick: (e) => { e.stopPropagation(); renameDeckPrompt(d); } }, "✎"),
           Number(d.id) === 1 ? "" :
             el("button", { class: "icon", title: "Delete", onclick: (e) => { e.stopPropagation(); deleteDeckPrompt(d); } }, "🗑"),
@@ -582,6 +583,109 @@ function renderEditNote(noteId) {
       ),
       el("h3", {}, "Card actions"),
       noteActions(note, () => renderEditNote(noteId)),
+    ),
+  );
+}
+
+// --- deck options ---
+
+function renderDeckOptions(deckId) {
+  state.card = null;
+  const deck = state.col.decks[String(deckId)];
+  const dcId = deck && deck.conf != null ? String(deck.conf) : "1";
+  const dc = state.col.dconf[dcId] ?? state.col.dconf["1"];
+  if (!dc) return renderDecks();
+  const nu = dc.new ?? (dc.new = {});
+  const rev = dc.rev ?? (dc.rev = {});
+  const lapse = dc.lapse ?? (dc.lapse = {});
+
+  const num = (v, step) => { const i = el("input", { type: "number", value: String(v ?? "") }); if (step) i.step = step; return i; };
+  const txt = (v) => el("input", { type: "text", value: v });
+  const check = (v) => { const c = el("input", { type: "checkbox" }); c.checked = !!v; return c; };
+  const parseSteps = (s) => s.split(/[\s,]+/).map(Number).filter((n) => Number.isFinite(n) && n > 0);
+
+  const ints = nu.ints ?? [1, 4, 7];
+  const newSteps = txt((nu.delays ?? [1, 10]).join(" "));
+  const newPerDay = num(nu.perDay ?? 20);
+  const gradGood = num(ints[0] ?? 1);
+  const gradEasy = num(ints[1] ?? 4);
+  const startEase = num((nu.initialFactor ?? 2500) / 1000, "0.01");
+  const newBury = check(nu.bury ?? true);
+
+  const revPerDay = num(rev.perDay ?? 200);
+  const maxIvl = num(rev.maxIvl ?? 36500);
+  const easyBonus = num(rev.ease4 ?? 1.3, "0.05");
+  const ivlMod = num(rev.ivlFct ?? 1.0, "0.05");
+  const hardFactor = num(rev.hardFactor ?? 1.2, "0.05");
+  const revBury = check(rev.bury ?? true);
+
+  const lapseSteps = txt((lapse.delays ?? [10]).join(" "));
+  const leechFails = num(lapse.leechFails ?? 8);
+  const minInt = num(lapse.minInt ?? 1);
+  const newIvlPct = num(Math.round((lapse.mult ?? 0) * 100));
+  const leechAction = el("select", {}, el("option", { value: 0 }, "Suspend"), el("option", { value: 1 }, "Tag only"));
+  leechAction.value = String(lapse.leechAction ?? 0);
+
+  const fsrsOn = check(state.col.conf.fsrs === true);
+  const retention = num(dc.desiredRetention ?? state.col.conf.desiredRetention ?? 0.9, "0.01");
+  const fsrsParams = txt((dc.fsrsParams6 ?? []).join(", "));
+
+  const save = async () => {
+    nu.delays = parseSteps(newSteps.value);
+    nu.perDay = Number(newPerDay.value) || 0;
+    nu.ints = [Number(gradGood.value) || 1, Number(gradEasy.value) || 4, ints[2] ?? 7];
+    nu.initialFactor = Math.round((Number(startEase.value) || 2.5) * 1000);
+    nu.bury = newBury.checked;
+    rev.perDay = Number(revPerDay.value) || 0;
+    rev.maxIvl = Number(maxIvl.value) || 36500;
+    rev.ease4 = Number(easyBonus.value) || 1.3;
+    rev.ivlFct = Number(ivlMod.value) || 1;
+    rev.hardFactor = Number(hardFactor.value) || 1.2;
+    rev.bury = revBury.checked;
+    lapse.delays = parseSteps(lapseSteps.value);
+    lapse.leechFails = Number(leechFails.value) || 8;
+    lapse.minInt = Number(minInt.value) || 1;
+    lapse.mult = (Number(newIvlPct.value) || 0) / 100;
+    lapse.leechAction = Number(leechAction.value) || 0;
+    state.col.conf.fsrs = fsrsOn.checked;
+    const r = Number(retention.value);
+    if (Number.isFinite(r)) dc.desiredRetention = Math.min(Math.max(r, 0.7), 0.99);
+    const ps = fsrsParams.value.split(/[\s,]+/).map(Number).filter((n) => Number.isFinite(n));
+    if ([17, 19, 21].includes(ps.length)) dc.fsrsParams6 = ps;
+    else if (ps.length === 0) delete dc.fsrsParams6;
+    await putMeta(state.db, state.col);
+    setStatus("Deck options saved.");
+    renderDecks();
+  };
+
+  const field = (label, input) => el("label", {}, label, input);
+  show(
+    el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
+    el("h2", {}, `Options — ${deck.name}`),
+    el("div", { class: "form" },
+      el("h3", {}, "New cards"),
+      field("Learning steps (minutes)", newSteps),
+      field("New cards/day", newPerDay),
+      el("div", { class: "row" }, field("Graduating interval (days)", gradGood), field("Easy interval (days)", gradEasy)),
+      field("Starting ease", startEase),
+      el("label", { class: "inline" }, newBury, "Bury new siblings"),
+      el("h3", {}, "Reviews"),
+      field("Maximum reviews/day", revPerDay),
+      field("Maximum interval (days)", maxIvl),
+      el("div", { class: "row" }, field("Easy bonus", easyBonus), field("Hard interval", hardFactor), field("Interval modifier", ivlMod)),
+      el("label", { class: "inline" }, revBury, "Bury review siblings"),
+      el("h3", {}, "Lapses"),
+      field("Relearning steps (minutes)", lapseSteps),
+      field("Leech threshold (lapses)", leechFails),
+      field("Minimum interval (days)", minInt),
+      field("New interval (% of old)", newIvlPct),
+      field("Leech action", leechAction),
+      el("h3", {}, "FSRS"),
+      el("label", { class: "inline" }, fsrsOn, "Enable FSRS (whole collection)"),
+      field("Desired retention (0.70–0.99)", retention),
+      field("Parameters (17/19/21 numbers, comma-separated; blank = default)", fsrsParams),
+      el("p", { class: "muted" }, "Changes apply to every deck sharing this options group."),
+      el("div", { class: "row" }, el("button", { onclick: save }, "Save")),
     ),
   );
 }

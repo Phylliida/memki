@@ -173,6 +173,9 @@ main h3 { margin: 18px 0 4px; font-size: 15px; color: var(--muted); }
 }
 .form textarea { min-height: 80px; resize: vertical; }
 .form .row { display: flex; gap: 10px; }
+.form .row > label { flex: 1; }
+.form label.inline { flex-direction: row; align-items: center; gap: 8px; color: var(--text); }
+.form label.inline input { width: auto; }
 .form input[type="text"] { width: 100%; }
 button.danger { border-color: var(--again); color: var(--again); margin-left: auto; }
 

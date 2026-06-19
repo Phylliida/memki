@@ -448,7 +448,7 @@ export class Scheduler {
     };
 
     if (this.fsrsEnabled) {
-      const fsrs = new FSRS(this.fsrsParameters, this.desiredRetentionFor(dc));
+      const fsrs = new FSRS(dc.fsrsParams6 ?? this.fsrsParameters, this.desiredRetentionFor(dc));
       const elapsed = current.kind === "review" ? current.elapsedDays
         : current.kind === "relearning" ? current.review.elapsedDays : 0;
       const mem = current.kind === "review" ? current.memoryState
