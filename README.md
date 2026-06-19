@@ -25,7 +25,9 @@ export back to `.apkg`.
 | Template renderer (fields, conditionals, **cloze**, **type-in**, MathJax) | ✅ |
 | IndexedDB persistence | ✅ whole-collection + incremental card/revlog/media |
 | Browser study UI (`web/`) | ✅ study (keyboard shortcuts, audio/video, note-type CSS, **undo**) |
-| Browse / edit / delete + deck management | ✅ search, edit notes, deck tree (add/rename/delete) |
+| Browse (Anki search syntax) / edit / delete + deck management | ✅ `deck:`/`tag:`/`is:`/`prop:`/`-`/`or`; edit notes; deck tree |
+| Card operations | ✅ suspend, bury, flag, forget, set due date, move deck (browser + review) |
+| Deck options UI | ✅ steps, limits, intervals, ease, leech, FSRS retention/params |
 | Note-type / template editor | ✅ fields (add/remove/rename), templates, CSS, with note/card migration |
 | Filtered decks + custom study | ✅ build/empty (odid/odue), review-ahead / all / search presets |
 | Image occlusion | ✅ self-contained editor (rectangle masks, hide-one-guess-one) |
