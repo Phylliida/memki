@@ -50,6 +50,21 @@ function show(...nodes) {
   v.replaceChildren(...nodes);
 }
 
+/** A valid model id: the preferred one if it exists, else the first model. */
+function validModelId(preferred) {
+  if (preferred != null && state.col.models[String(preferred)]) return String(preferred);
+  const first = Object.values(state.col.models)[0];
+  return first ? String(first.id) : "";
+}
+
+/** Ensure conf.curModel points at a real note type (imports can leave it stale). */
+function sanitizeCurModel(col) {
+  if (!col.models[String(col.conf.curModel)]) {
+    const first = Object.values(col.models)[0];
+    col.conf.curModel = first ? String(first.id) : null;
+  }
+}
+
 // --- rich-text field editor (contenteditable + native formatting, like Anki) ---
 
 function tbBtn(label, title, onClick) {
@@ -499,14 +514,18 @@ function renderAddCard() {
   const models = Object.values(state.col.models);
   const decks = Object.values(state.col.decks).filter((d) => !d.dyn);
   const modelSel = el("select", {}, ...models.map((m) => el("option", { value: m.id }, m.name)));
-  if (state.col.conf.curModel) modelSel.value = state.col.conf.curModel;
+  modelSel.value = validModelId(state.col.conf.curModel);
   const deckSel = el("select", {}, ...decks.map((d) => el("option", { value: d.id }, d.name)));
 
   const fieldsWrap = el("div", { class: "form-fields" });
   let inputs = [];
   const rebuildFields = () => {
-    const model = state.col.noteType(Number(modelSel.value));
+    const model = state.col.noteType(Number(modelSel.value)) ?? models[0];
     inputs = [];
+    if (!model) {
+      fieldsWrap.replaceChildren(el("p", { class: "muted" }, "No note types — create one in Types."));
+      return;
+    }
     fieldsWrap.replaceChildren(...model.flds.map((f) => {
       const ed = richEditor("");
       inputs.push(ed);
@@ -517,7 +536,8 @@ function renderAddCard() {
   rebuildFields();
 
   const save = async () => {
-    const model = state.col.noteType(Number(modelSel.value));
+    const model = state.col.noteType(Number(modelSel.value)) ?? models[0];
+    if (!model) { setStatus("No note type available."); return; }
     const fields = inputs.map((ed) => ed.getHTML());
     if (!stripHtml(fields[0]).trim()) { setStatus("The first field is empty."); return; }
     const note = addNoteWithCards(model, fields, Number(deckSel.value));
@@ -555,7 +575,7 @@ function renderImportCsv() {
   const decks = Object.values(state.col.decks).filter((d) => !d.dyn);
   const fileInput = el("input", { type: "file", accept: ".csv,.tsv,.txt" });
   const modelSel = el("select", {}, ...models.map((m) => el("option", { value: m.id }, m.name)));
-  if (state.col.conf.curModel) modelSel.value = state.col.conf.curModel;
+  modelSel.value = validModelId(state.col.conf.curModel);
   const deckSel = el("select", {}, ...decks.map((d) => el("option", { value: d.id }, d.name)));
   const delimSel = el("select", {},
     el("option", { value: "" }, "Auto"), el("option", { value: "," }, "Comma"),
@@ -574,7 +594,8 @@ function renderImportCsv() {
     const cols = Math.max(...parsed.rows.map((r) => r.length));
     const header = headerChk.checked ? parsed.rows[0] : null;
     const colLabel = (i) => (header && header[i] ? `Col ${i + 1} — ${header[i]}` : `Col ${i + 1}`);
-    const model = state.col.noteType(Number(modelSel.value));
+    const model = state.col.noteType(Number(modelSel.value)) ?? models[0];
+    if (!model) return;
     mappingBox.replaceChildren(...model.flds.map((f, fi) => {
       const sel = el("select", {},
         el("option", { value: -1 }, "(empty)"),
@@ -602,7 +623,8 @@ function renderImportCsv() {
 
   const doImport = async () => {
     if (!parsed || !parsed.rows.length) { setStatus("Choose a file first."); return; }
-    const model = state.col.noteType(Number(modelSel.value));
+    const model = state.col.noteType(Number(modelSel.value)) ?? models[0];
+    if (!model) { setStatus("No note type available."); return; }
     const did = Number(deckSel.value);
     const map = mapSelects.map((s) => Number(s.value));
     const dataRows = headerChk.checked ? parsed.rows.slice(1) : parsed.rows;
@@ -1215,6 +1237,7 @@ async function doImport(file) {
       await saveMedia(state.db, media);
       setStatus(`Merged: ${r.added} added, ${r.updated} updated.`);
     } else {
+      sanitizeCurModel(collection);
       state.col = collection;
       state.media = media;
       state.mediaUrls.clear();
@@ -1294,9 +1317,12 @@ async function init() {
     await saveCollection(state.db, state.col);
   }
   state.media = await loadMedia(state.db);
+  sanitizeCurModel(state.col); // a stale curModel (e.g. from an import) would break Add Card
   // New-day maintenance: un-bury yesterday's buried siblings, then persist.
   if (new Scheduler(state.col).unburyForNewDay() > 0) {
     await saveCollection(state.db, state.col);
+  } else {
+    await putMeta(state.db, state.col);
   }
   wireHeader();
   wireKeyboard();
