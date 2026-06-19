@@ -6,6 +6,7 @@ import { Collection, Note, Card, NoteTypeKind, CardType, imageOcclusionNoteType 
 import { Scheduler } from "../src/scheduler.js";
 import { renderCard, clozeNumbers } from "../src/template.js";
 import { collectionStats } from "../src/stats.js";
+import { compileSearch, searchContext } from "../src/search.js";
 import { Rating } from "../src/fsrs.js";
 import { stripHtml } from "../src/text.js";
 import {
@@ -498,19 +499,21 @@ function deckName(did) {
 function renderBrowse(query = "") {
   state.card = null;
   const search = el("input", {
-    class: "search", type: "search", placeholder: "Search fields, tags, deck…", value: query,
+    class: "search", type: "search", value: query,
+    placeholder: 'Search — e.g. deck:Spanish tag:verb is:due prop:ivl>21 -flag:1',
     oninput: (e) => { state.browseQuery = e.target.value; renderRows(e.target.value); },
   });
   const list = el("div", { class: "browse-list" });
 
   const renderRows = (qstr) => {
-    const ql = qstr.trim().toLowerCase();
-    const all = [...state.col.cards.values()].filter((c) => {
-      if (!ql) return true;
-      const note = state.col.notes.get(c.nid);
-      const hay = `${note.fields.join(" ")} ${note.tags.join(" ")} ${deckName(c.did)}`.toLowerCase();
-      return hay.includes(ql);
-    });
+    let all;
+    try {
+      const pred = compileSearch(qstr);
+      const ctx = searchContext(state.col);
+      all = [...state.col.cards.values()].filter((c) => pred(c, ctx));
+    } catch {
+      all = [];
+    }
     const shown = all.slice(0, 500);
     list.replaceChildren(
       ...shown.map((card) => {
