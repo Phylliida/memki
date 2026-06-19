@@ -124,6 +124,36 @@ test("filtered deck: build gathers cards, study reschedules, empty returns them"
   assert.equal(b.due, 9_000_000); // unreviewed → restored
 });
 
+test("manual card operations: suspend/bury/flag/forget/setDueDate/move", () => {
+  const col = collectionWithDeck();
+  const card = addCard(col, { type: CardType.Review, queue: CardQueue.Review, ivl: 10, factor: 2500, reps: 3, lapses: 1 });
+  const sched = new Scheduler(col);
+
+  sched.suspend(card);
+  assert.equal(card.queue, CardQueue.Suspended);
+  sched.unsuspend(card);
+  assert.equal(card.queue, CardQueue.Review); // restored from type
+  sched.buryCard(card);
+  assert.equal(card.queue, CardQueue.UserBuried);
+  sched.setFlag(card, 3);
+  assert.equal(card.flags & 7, 3);
+
+  sched.setDueDate(card, 5);
+  assert.equal(card.type, CardType.Review);
+  assert.equal(card.due, sched.daysElapsed + 5);
+  assert.equal(card.ivl, 5);
+
+  sched.moveCard(card, 7);
+  assert.equal(card.did, 7);
+
+  sched.forget(card);
+  assert.equal(card.type, CardType.New);
+  assert.equal(card.queue, CardQueue.New);
+  assert.equal(card.reps, 0);
+  assert.equal(card.ivl, 0);
+  assert.equal(card.memoryState, null);
+});
+
 test("subdeck cards are included when studying the parent", () => {
   const col = collectionWithDeck();
   // Add a child deck "Default::Child".

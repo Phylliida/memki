@@ -2,7 +2,7 @@
 // Core study/persistence runs fully offline; .apkg import/export lazily loads
 // sql.js + fflate + fzstd from the CDN (see the import map in index.html).
 
-import { Collection, Note, Card, NoteTypeKind, CardType, imageOcclusionNoteType } from "../src/model.js";
+import { Collection, Note, Card, NoteTypeKind, CardType, CardQueue, imageOcclusionNoteType } from "../src/model.js";
 import { Scheduler } from "../src/scheduler.js";
 import { renderCard, clozeNumbers } from "../src/template.js";
 import { collectionStats } from "../src/stats.js";
@@ -319,13 +319,13 @@ function renderStudy() {
   const { note, noteType } = noteTypeAndNote(card);
   const showAnswerBtn = el("button", { class: "show-answer", onclick: () => showAnswer() }, "Show Answer");
   if (noteType.ossIO) {
-    show(back, occlusionFace(note, card.ord, "q"), showAnswerBtn);
+    show(back, occlusionFace(note, card.ord, "q"), showAnswerBtn, reviewMoreBar());
     return;
   }
   applyModelCss(noteType);
   const { question } = renderCard(noteType, card.ord, note);
 
-  show(back, cardFace(question), showAnswerBtn);
+  show(back, cardFace(question), showAnswerBtn, reviewMoreBar());
   autoplayFirstMedia();
   typesetMath();
   // Focus a type-in-the-answer box if the template has one.
@@ -352,13 +352,13 @@ function showAnswer() {
   const crumbs = el("div", { class: "crumbs", onclick: renderDecks }, "← Decks");
 
   if (noteType.ossIO) {
-    show(crumbs, occlusionFace(note, card.ord, "a"), controls);
+    show(crumbs, occlusionFace(note, card.ord, "a"), controls, reviewMoreBar());
     return;
   }
   applyModelCss(noteType);
   const typed = view().querySelector("#typeans")?.value ?? "";
   const { answer } = renderCard(noteType, card.ord, note, { typed });
-  show(crumbs, cardFace(answer), controls);
+  show(crumbs, cardFace(answer), controls, reviewMoreBar());
   autoplayFirstMedia();
   typesetMath();
 }
@@ -580,7 +580,60 @@ function renderEditNote(noteId) {
         el("button", { onclick: save }, "Save"),
         el("button", { class: "danger", onclick: del }, "Delete"),
       ),
+      el("h3", {}, "Card actions"),
+      noteActions(note, () => renderEditNote(noteId)),
     ),
+  );
+}
+
+// --- card operations (shared) ---
+
+async function applyToNoteCards(note, fn, { meta = false } = {}) {
+  const sched = new Scheduler(state.col);
+  const cards = state.col.cardsForNote(note.id);
+  for (const c of cards) fn(sched, c);
+  for (const c of cards) await putCard(state.db, c);
+  if (meta) await putMeta(state.db, state.col);
+}
+
+/** A row of note-level operations (applied to all the note's cards). */
+function noteActions(note, onDone) {
+  const cards = state.col.cardsForNote(note.id);
+  const anySusp = cards.some((c) => c.queue === CardQueue.Suspended);
+  const decks = Object.values(state.col.decks).filter((d) => !d.dyn);
+  const flagSel = el("select", {}, ...["No flag", "Flag 1", "Flag 2", "Flag 3", "Flag 4"].map((l, i) => el("option", { value: i }, l)));
+  flagSel.value = String((cards[0]?.flags ?? 0) & 7);
+  const moveSel = el("select", {}, ...decks.map((d) => el("option", { value: d.id }, d.name)));
+  moveSel.value = String(cards[0]?.did ?? 1);
+  const act = async (fn, meta) => { await applyToNoteCards(note, fn, { meta }); onDone(); };
+
+  return el("div", { class: "note-actions" },
+    el("button", { onclick: () => act((s, c) => (anySusp ? s.unsuspend(c) : s.suspend(c))) }, anySusp ? "Unsuspend" : "Suspend"),
+    el("button", { onclick: () => act((s, c) => s.buryCard(c)) }, "Bury"),
+    el("button", { onclick: () => { if (confirm("Reset these cards to new?")) act((s, c) => s.forget(c), true); } }, "Forget"),
+    el("button", { onclick: () => { const d = Number(prompt("Due in how many days?", "1")); if (Number.isFinite(d)) act((s, c) => s.setDueDate(c, d)); } }, "Set Due"),
+    el("span", { class: "na-group" }, "Flag", flagSel, el("button", { onclick: () => act((s, c) => s.setFlag(c, Number(flagSel.value))) }, "Set")),
+    el("span", { class: "na-group" }, "Move", moveSel, el("button", { onclick: () => act((s, c) => s.moveCard(c, Number(moveSel.value))) }, "Go")),
+  );
+}
+
+/** A compact operations bar for the current card during review. */
+function reviewMoreBar() {
+  const card = state.card;
+  const note = state.col.notes.get(card.nid);
+  const act = async (fn, meta = false) => {
+    const sched = new Scheduler(state.col);
+    fn(sched, card);
+    await putCard(state.db, card);
+    if (meta) await putMeta(state.db, state.col);
+    renderStudy();
+  };
+  return el("div", { class: "more-bar" },
+    el("button", { class: "icon", onclick: () => renderEditNote(note.id) }, "✎ Edit"),
+    el("button", { class: "icon", onclick: () => act((s, c) => s.buryCard(c)) }, "Bury"),
+    el("button", { class: "icon", onclick: () => act((s, c) => s.suspend(c)) }, "Suspend"),
+    el("button", { class: "icon", onclick: () => { if (confirm("Reset to new?")) act((s, c) => s.forget(c), true); } }, "Forget"),
+    el("button", { class: "icon", onclick: () => { const d = Number(prompt("Due in days?", "1")); if (Number.isFinite(d)) act((s, c) => s.setDueDate(c, d)); } }, "Set Due"),
   );
 }
 

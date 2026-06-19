@@ -138,6 +138,12 @@ hr#answer { border: none; border-top: 1px solid #ccc; margin: 20px 0; }
 .chart .bar { flex: 1; min-height: 1px; border-radius: 2px 2px 0 0; }
 main h3 { margin: 18px 0 4px; font-size: 15px; color: var(--muted); }
 
+/* Card actions */
+.note-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.note-actions .na-group { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; }
+.more-bar { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 14px; }
+.more-bar .icon { font-size: 13px; color: var(--muted); }
+
 /* Image occlusion */
 .io-stage { position: relative; display: inline-block; max-width: 100%; line-height: 0; margin: 8px auto; }
 .io-stage img { display: block; max-width: 100%; height: auto; }

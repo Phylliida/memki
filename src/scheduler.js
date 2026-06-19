@@ -588,6 +588,60 @@ export class Scheduler {
     }
   }
 
+  // --- card operations (manual) ---
+
+  _queueForType(card) {
+    return card.type === CardType.Review ? CardQueue.Review
+      : card.type === CardType.New ? CardQueue.New : CardQueue.Learning;
+  }
+  _touch(card) { card.mod = this.now; card.usn = -1; }
+
+  suspend(card) { card.queue = CardQueue.Suspended; this._touch(card); }
+  unsuspend(card) {
+    if (card.queue === CardQueue.Suspended) card.queue = this._queueForType(card);
+    this._touch(card);
+  }
+  buryCard(card) { card.queue = CardQueue.UserBuried; this._touch(card); }
+  setFlag(card, n) { card.flags = (card.flags & ~7) | (n & 7); this._touch(card); }
+
+  /** Reset a card to "new" (forget), giving it a fresh position. */
+  forget(card) {
+    card.type = CardType.New;
+    card.queue = CardQueue.New;
+    card.ivl = 0;
+    card.factor = 0;
+    card.reps = 0;
+    card.lapses = 0;
+    card.left = 0;
+    card.odue = 0;
+    card.odid = 0;
+    card.memoryState = null;
+    const due = this.col.conf.nextPos ?? 1;
+    this.col.conf.nextPos = due + 1;
+    card.due = due;
+    this._touch(card);
+  }
+
+  /** Schedule a card as a review card due in `days` days. */
+  setDueDate(card, days) {
+    card.type = CardType.Review;
+    card.queue = CardQueue.Review;
+    card.ivl = Math.max(days, 1);
+    card.due = this.daysElapsed + days;
+    card.left = 0;
+    card.odue = 0;
+    card.odid = 0;
+    this._touch(card);
+  }
+
+  /** Move a card to another (normal) deck. */
+  moveCard(card, did) {
+    card.did = did;
+    card.odid = 0;
+    card.odue = 0;
+    this._touch(card);
+  }
+
   // --- filtered (dynamic) decks ---
 
   /**
