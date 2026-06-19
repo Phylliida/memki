@@ -20,7 +20,9 @@ export back to `.apkg`.
 |---|---|
 | FSRS-6 memory model (`src/fsrs.js`) | ✅ matches fsrs-rs golden vectors |
 | Data model (col/notes/cards/revlog/decks/models) | ✅ schema-v11; csum/base91/GUID match rslib |
-| `.apkg` / `.colpkg` import + export | ✅ real deck round-trips import→export→import |
+| `.apkg` / `.colpkg` import + export | ✅ round-trips; import = merge-by-GUID or replace |
+| CSV / TSV import | ✅ delimiter detect, header, column→field mapping |
+| Rich-text field editor | ✅ contenteditable (bold/italic/lists/cloze/HTML toggle) |
 | Scheduler (v3: SM-2 + FSRS, fuzz, daily limits, burying, learn-ahead) | ✅ matches rslib state-machine + fuzz vectors |
 | Template renderer (fields, conditionals, **cloze**, **type-in**, MathJax) | ✅ |
 | IndexedDB persistence | ✅ whole-collection + incremental card/revlog/media |
