@@ -1011,7 +1011,7 @@ function renderBrowse() {
   const openInPane = (noteId) => {
     selectedNoteId = noteId;
     editPane.replaceChildren(noteEditorForm(noteId, {
-      onSaved: () => renderRows(currentQuery()),
+      onAutoSaved: () => renderRows(currentQuery()),
       onDeleted: () => {
         selectedNoteId = null;
         editPane.replaceChildren(panePlaceholder());
@@ -1265,7 +1265,7 @@ function renderBrowse() {
  * The note editor form, shared by the full-page editor (mobile) and the
  * browse side pane (desktop). Editing a note edits every card of that note.
  * @param {number} noteId
- * @param {{ onSaved?: () => void, onDeleted?: () => void, onCardsChanged?: () => void, onTagsChanged?: () => void }} cb
+ * @param {{ onAutoSaved?: () => void, onDeleted?: () => void, onCardsChanged?: () => void, onTagsChanged?: () => void }} cb
  */
 function noteEditorForm(noteId, cb = {}) {
   const note = state.col.notes.get(noteId);
@@ -1331,7 +1331,12 @@ function noteEditorForm(noteId, cb = {}) {
   };
   renderTags();
 
-  const save = async () => {
+  // Auto-save: field edits persist as you type (debounced), and immediately
+  // when focus leaves the editor. There is no Save button.
+  let saveTimer = null;
+  const doSave = async () => {
+    saveTimer = null;
+    if (!state.col.notes.has(note.id)) return; // deleted meanwhile
     note.fields = inputs.map(({ ed }) => ed.getHTML());
     note.mod = Math.floor(Date.now() / 1000);
     note.normalize(model.sortf ?? 0);
@@ -1350,11 +1355,17 @@ function noteEditorForm(noteId, cb = {}) {
     }
     if (made) await putMeta(state.db, state.col);
     setStatus(made ? `Saved (+${made} card${made > 1 ? "s" : ""}).` : "Saved.");
-    cb.onSaved?.();
+    cb.onAutoSaved?.();
+  };
+  const scheduleSave = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(doSave, 400);
   };
 
   const del = async () => {
     if (!confirm("Delete this note and its cards?")) return;
+    clearTimeout(saveTimer);
+    saveTimer = null;
     const cardIds = state.col.removeNote(noteId);
     await deleteNoteAndCards(state.db, noteId, cardIds);
     setStatus("Deleted.");
@@ -1362,17 +1373,23 @@ function noteEditorForm(noteId, cb = {}) {
   };
 
   const cardCount = state.col.cardsForNote(noteId).length;
+  const fieldsBox = el("div", { class: "form ne-fields" },
+    ...inputs.map(({ f, ed }) => el("label", {}, f.name, ed.el)));
+  fieldsBox.addEventListener("input", scheduleSave);
+  fieldsBox.addEventListener("focusout", () => {
+    if (saveTimer) { clearTimeout(saveTimer); doSave(); }
+  });
+
   return el("div", { class: "form note-editor" },
     el("div", { class: "muted ne-head" },
-      `${model.name} · ${cardCount} card${cardCount === 1 ? "" : "s"} share this note`),
-    ...inputs.map(({ f, ed }) => el("label", {}, f.name, ed.el)),
+      `${model.name} · ${cardCount} card${cardCount === 1 ? "" : "s"} share this note · edits save automatically`),
+    fieldsBox,
     el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Tags"), tagBox),
     el("div", { class: "row" },
-      el("button", { onclick: save }, "Save"),
       el("button", { class: "danger", onclick: del }, "Delete"),
     ),
     el("h3", {}, "Card actions"),
-    noteActions(note, () => (cb.onCardsChanged ?? cb.onSaved ?? (() => {}))()),
+    noteActions(note, () => (cb.onCardsChanged ?? cb.onAutoSaved ?? (() => {}))()),
   );
 }
 
@@ -1383,7 +1400,6 @@ function renderEditNote(noteId) {
     el("div", { class: "crumbs", onclick: back }, "← Browse"),
     el("h2", {}, "Edit"),
     noteEditorForm(noteId, {
-      onSaved: back,
       onDeleted: back,
       onCardsChanged: () => renderEditNote(noteId),
     }),
