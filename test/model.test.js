@@ -358,3 +358,56 @@ test("without memory, adding to a deck creates a fresh card", () => {
   assert.equal(fresh.type, CardType.New);
   assert.equal(fresh.reps, 0);
 });
+
+// --- note type change ---
+
+test("changeNoteType remaps fields, resets scheduling, keeps decks/flags/tags", () => {
+  const col = Collection.createDefault();
+  const basic = Object.values(col.models).find((m) => m.name === "Basic");
+  const reversed = Object.values(col.models).find((m) => m.name === "Basic (and reversed card)");
+  const wow = col.addDeck("Wowwow");
+
+  const note = new Note({ mid: basic.id, fields: ["front-v", "back-v"], tags: ["keepme"] }).normalize();
+  col.addNote(note);
+  const c1 = col.addCard(new Card({ nid: note.id, did: 1, ord: 0, type: CardType.Review, queue: CardQueue.Review, ivl: 30, due: 100, reps: 5, factor: 2500 }));
+  const c2 = col.addCard(new Card({ nid: note.id, did: wow.id, ord: 0 }));
+  writeCardFlags(c1, new Set([2, 5]));
+  writeCardFlags(c2, new Set([1]));
+
+  // map: Front <- old 0, Back <- old 1 (same names prefill in UI)
+  const res = col.changeNoteType(note.id, reversed.id, [0, 1]);
+  assert.ok(res);
+  assert.deepEqual(res.decks.sort(), [1, wow.id].sort());
+  assert.deepEqual([...res.flags].sort(), [1, 2, 5]); // union across old cards
+  assert.equal(res.deletedIds.length, 2);
+  assert.equal(col.cardsForNote(note.id).length, 0); // old cards gone
+  assert.equal(note.mid, reversed.id);
+  assert.deepEqual(note.fields, ["front-v", "back-v"]);
+  assert.deepEqual(note.tags, ["keepme"]);
+  assert.doesNotMatch(note.data ?? "", /sched/); // per-deck memory reset
+
+  // caller-side recreation: fresh cards in both decks, flags carried
+  for (const did of res.decks) {
+    for (const ord of [0, 1]) { // reversed type has two templates
+      const card = col.addNoteCardToDeck(note, did, ord);
+      writeCardFlags(card, res.flags);
+      assert.equal(card.type, CardType.New);
+      assert.equal(card.reps, 0);
+      assert.deepEqual([...cardFlagSet(card)].sort(), [1, 2, 5]);
+    }
+  }
+  assert.equal(col.cardsForNote(note.id).length, 4);
+});
+
+test("changeNoteType field map supports blanks and reordering", () => {
+  const col = Collection.createDefault();
+  const basic = Object.values(col.models).find((m) => m.name === "Basic");
+  const opt = Object.values(col.models).find((m) => m.name === "Basic (optional reversed card)");
+  const note = new Note({ mid: basic.id, fields: ["A", "B"] }).normalize();
+  col.addNote(note);
+  col.addCard(new Card({ nid: note.id, did: 1, ord: 0 }));
+
+  // Front <- old Back, Back <- old Front, Add Reverse <- blank
+  col.changeNoteType(note.id, opt.id, [1, 0, -1]);
+  assert.deepEqual(note.fields, ["B", "A", ""]);
+});

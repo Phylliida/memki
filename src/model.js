@@ -658,6 +658,42 @@ export class Collection {
     return this.models[String(mid)] ?? null;
   }
 
+  /**
+   * Change a note's type. Fields are remapped per `fieldMap` (index into the
+   * old fields for each new field, or -1/null for blank). All old cards are
+   * deleted (scheduling starts fresh — including the note's per-deck memory);
+   * tags stay on the note, and the caller recreates cards in the returned
+   * decks, carrying the returned flag set.
+   * @param {number[]} fieldMap newFieldIdx -> oldFieldIdx | -1
+   * @returns {{ decks: number[], flags: Set<number>, deletedIds: number[] } | null}
+   */
+  changeNoteType(noteId, newMid, fieldMap) {
+    const note = this.notes.get(noteId);
+    const newModel = this.noteType(newMid);
+    if (!note || !newModel) return null;
+    const oldCards = this.cardsForNote(noteId);
+    const decks = [...new Set(oldCards.map((c) => c.did))];
+    const flags = new Set();
+    for (const c of oldCards) for (const f of cardFlagSet(c)) flags.add(f);
+    const deletedIds = oldCards.map((c) => c.id);
+    for (const c of oldCards) {
+      this.cards.delete(c.id);
+      this.graves.push({ usn: -1, oid: c.id, type: 0 });
+    }
+    const oldFields = note.fields;
+    note.fields = newModel.flds.map((_f, i) => {
+      const src = fieldMap[i];
+      return src != null && src >= 0 ? oldFields[src] ?? "" : "";
+    });
+    note.mid = newMid;
+    note.mod = nowSec();
+    const d = this._noteData(note);
+    delete d.sched; // fresh metadata everywhere, per the type change's meaning
+    note.data = Object.keys(d).length ? JSON.stringify(d) : "";
+    note.normalize(newModel.sortf ?? 0);
+    return { decks, flags, deletedIds };
+  }
+
   /** Notes of a given note type. */
   notesOfType(mid) {
     return [...this.notes.values()].filter((n) => n.mid === mid);

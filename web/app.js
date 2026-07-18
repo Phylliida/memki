@@ -5,7 +5,7 @@
 import {
   Collection, Note, Card, NoteTypeKind, CardType, CardQueue, imageOcclusionNoteType,
   basicNoteType, basicReversedNoteType, basicOptionalReversedNoteType, basicTypeNoteType, clozeNoteType,
-  cardFlagSet,
+  cardFlagSet, writeCardFlags,
 } from "../src/model.js";
 import { Scheduler } from "../src/scheduler.js";
 import { renderCard, cardOrdinalsForNote } from "../src/template.js";
@@ -1409,6 +1409,49 @@ function noteEditorForm(noteId, cb = {}) {
     cb.onDeleted?.();
   };
 
+  // Change-type modal: pick the target type, map each of its fields from an
+  // old field (prefilled by matching name, then position).
+  const openChangeTypeModal = () => {
+    const others = Object.values(state.col.models).filter((m) => m.id !== model.id);
+    if (!others.length) { setStatus("There is no other note type to change to."); return; }
+    const typeSel = el("select", {}, ...others.map((m) => el("option", { value: m.id }, m.name)));
+    const mapBox = el("div", { class: "form" });
+    const selects = [];
+    const buildMap = () => {
+      const target = state.col.noteType(Number(typeSel.value));
+      selects.length = 0;
+      mapBox.replaceChildren(...target.flds.map((f, i) => {
+        const sel = el("select", {},
+          el("option", { value: -1 }, "(blank)"),
+          ...model.flds.map((of, oi) => el("option", { value: oi }, of.name)));
+        const byName = model.flds.findIndex((of) => of.name === f.name);
+        sel.value = String(byName !== -1 ? byName : (i < model.flds.length ? i : -1));
+        selects.push(sel);
+        return el("label", {}, `${f.name} ← old field`, sel);
+      }));
+    };
+    typeSel.addEventListener("change", buildMap);
+    buildMap();
+    const doChange = async () => {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+      await ensureHistory(); // old field values stay restorable
+      const ok = await applyChangeNoteType(note, Number(typeSel.value), selects.map((s) => Number(s.value)));
+      close();
+      if (ok) setStatus("Note type changed — cards recreated fresh.");
+      refresh();
+    };
+    const { close } = openModal([
+      el("h3", {}, "Change note type"),
+      el("div", { class: "muted pop-src" },
+        "Map each field of the new type from a field of this note. Cards are deleted and recreated fresh (scheduling resets); tags, flags, and deck membership are kept."),
+      el("div", { class: "form" }, el("label", {}, "New type", typeSel), mapBox),
+      el("div", { class: "row" },
+        el("button", { type: "button", onclick: doChange }, "Change"),
+        el("button", { type: "button", onclick: () => close() }, "Cancel")),
+    ]);
+  };
+
   // History modal: past versions of this note, restorable (restoring first
   // snapshots the current state, so restores are themselves undoable).
   const openHistoryModal = async () => {
@@ -1458,6 +1501,7 @@ function noteEditorForm(noteId, cb = {}) {
     el("div", { class: "row ne-bottom" },
       el("button", { onclick: () => openDeckModalForNote(note, refresh) }, "Decks"),
       el("button", { onclick: openHistoryModal }, "History"),
+      el("button", { onclick: openChangeTypeModal }, "Change Type"),
       el("button", { class: "danger", onclick: del }, "Delete"),
     ),
   );
@@ -1749,6 +1793,27 @@ async function toggleNoteDeck(note, did, on) {
   const ids = state.col.removeNoteFromDeck(note.id, did);
   await deleteCards(state.db, ids);
   await putNote(state.db, note); // the archived scheduling lives on the note
+  await putMeta(state.db, state.col);
+  return true;
+}
+
+/**
+ * Change a note's type with a field mapping: old cards are deleted, fresh
+ * cards are created in the same decks, and tags/flags/deck membership carry.
+ */
+async function applyChangeNoteType(note, newMid, fieldMap) {
+  const res = state.col.changeNoteType(note.id, newMid, fieldMap);
+  if (!res) return false;
+  const newModel = state.col.noteType(newMid);
+  for (const did of res.decks) {
+    for (const ord of cardOrdinalsForNote(newModel, note)) {
+      const card = state.col.addNoteCardToDeck(note, did, ord);
+      if (res.flags.size) writeCardFlags(card, res.flags);
+      await putCard(state.db, card);
+    }
+  }
+  await deleteCards(state.db, res.deletedIds);
+  await putNote(state.db, note);
   await putMeta(state.db, state.col);
   return true;
 }
