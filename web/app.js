@@ -956,6 +956,28 @@ function renderBrowse(query = "") {
   });
   const list = el("div", { class: "browse-list" });
 
+  // Right-hand edit pane (desktop): clicking a row edits in place.
+  const editPane = el("aside", { class: "browse-edit" });
+  const panePlaceholder = () =>
+    el("div", { class: "center muted" }, "Select a card to edit it here. Sibling cards share one note — editing updates them all.");
+  editPane.append(panePlaceholder());
+  let selectedNoteId = null;
+  const isDesktop = () => window.matchMedia("(min-width: 641px)").matches;
+
+  const openInPane = (noteId) => {
+    selectedNoteId = noteId;
+    editPane.replaceChildren(noteEditorForm(noteId, {
+      onSaved: () => renderRows(effectiveQuery()),
+      onDeleted: () => {
+        selectedNoteId = null;
+        editPane.replaceChildren(panePlaceholder());
+        renderRows(effectiveQuery());
+      },
+      onCardsChanged: () => { renderRows(effectiveQuery()); openInPane(noteId); },
+    }));
+    renderRows(effectiveQuery()); // refresh row highlight
+  };
+
   const effectiveQuery = () => {
     const parts = [];
     for (const set of Object.values(filters)) {
@@ -1047,7 +1069,10 @@ function renderBrowse(query = "") {
         const note = state.col.notes.get(card.nid);
         const title = stripHtml(note.fields[0] ?? "").slice(0, 80) || "(empty)";
         const flag = card.flags & 7;
-        return el("div", { class: "browse-row", onclick: () => renderEditNote(note.id) },
+        return el("div", {
+          class: `browse-row${note.id === selectedNoteId ? " selected" : ""}`,
+          onclick: () => (isDesktop() ? openInPane(note.id) : renderEditNote(note.id)),
+        },
           flag ? el("span", { class: `flag-dot f${flag}`, title: FLAG_NAMES[flag] }, "⚑") : "",
           el("span", { class: "br-title" }, title),
           el("span", { class: "br-deck" }, deckName(card.did)),
@@ -1072,14 +1097,20 @@ function renderBrowse(query = "") {
       ),
     ),
     search,
-    el("div", { class: "browse-layout" }, sidebar, list),
+    el("div", { class: "browse-layout" }, sidebar, list, editPane),
   );
   renderRows(effectiveQuery());
 }
 
-function renderEditNote(noteId) {
+/**
+ * The note editor form, shared by the full-page editor (mobile) and the
+ * browse side pane (desktop). Editing a note edits every card of that note.
+ * @param {number} noteId
+ * @param {{ onSaved?: () => void, onDeleted?: () => void, onCardsChanged?: () => void }} cb
+ */
+function noteEditorForm(noteId, cb = {}) {
   const note = state.col.notes.get(noteId);
-  if (!note) return renderBrowse(state.browseQuery ?? "");
+  if (!note) return el("div", { class: "center muted" }, "Note not found.");
   const model = state.col.noteType(note.mid);
 
   const inputs = model.flds.map((f) => ({ f, ed: richEditor(note.fields[f.ord] ?? "") }));
@@ -1105,7 +1136,7 @@ function renderEditNote(noteId) {
     }
     if (made) await putMeta(state.db, state.col);
     setStatus(made ? `Saved (+${made} card${made > 1 ? "s" : ""}).` : "Saved.");
-    renderBrowse(state.browseQuery ?? "");
+    cb.onSaved?.();
   };
 
   const del = async () => {
@@ -1113,22 +1144,35 @@ function renderEditNote(noteId) {
     const cardIds = state.col.removeNote(noteId);
     await deleteNoteAndCards(state.db, noteId, cardIds);
     setStatus("Deleted.");
-    renderBrowse(state.browseQuery ?? "");
+    cb.onDeleted?.();
   };
 
-  show(
-    el("div", { class: "crumbs", onclick: () => renderBrowse(state.browseQuery ?? "") }, "← Browse"),
-    el("h2", {}, `Edit (${model.name})`),
-    el("div", { class: "form" },
-      ...inputs.map(({ f, ed }) => el("label", {}, f.name, ed.el)),
-      el("label", {}, "Tags", tagsInput),
-      el("div", { class: "row" },
-        el("button", { onclick: save }, "Save"),
-        el("button", { class: "danger", onclick: del }, "Delete"),
-      ),
-      el("h3", {}, "Card actions"),
-      noteActions(note, () => renderEditNote(noteId)),
+  const cardCount = state.col.cardsForNote(noteId).length;
+  return el("div", { class: "form note-editor" },
+    el("div", { class: "muted ne-head" },
+      `${model.name} · ${cardCount} card${cardCount === 1 ? "" : "s"} share this note`),
+    ...inputs.map(({ f, ed }) => el("label", {}, f.name, ed.el)),
+    el("label", {}, "Tags", tagsInput),
+    el("div", { class: "row" },
+      el("button", { onclick: save }, "Save"),
+      el("button", { class: "danger", onclick: del }, "Delete"),
     ),
+    el("h3", {}, "Card actions"),
+    noteActions(note, () => (cb.onCardsChanged ?? cb.onSaved ?? (() => {}))()),
+  );
+}
+
+function renderEditNote(noteId) {
+  const back = () => renderBrowse(state.browseQuery ?? "");
+  if (!state.col.notes.get(noteId)) return back();
+  show(
+    el("div", { class: "crumbs", onclick: back }, "← Browse"),
+    el("h2", {}, "Edit"),
+    noteEditorForm(noteId, {
+      onSaved: back,
+      onDeleted: back,
+      onCardsChanged: () => renderEditNote(noteId),
+    }),
   );
 }
 

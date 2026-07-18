@@ -252,6 +252,12 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px;
 }
 .browse-layout .browse-list { flex: 1; min-width: 0; }
+.browse-edit {
+  flex: 0 0 420px; min-width: 0; position: sticky; top: 10px; max-height: 82vh; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px;
+}
+.browse-edit .ne-head { font-size: 12px; }
+.browse-row.selected { border-color: var(--accent); background: var(--panel-2); }
 .side-sec h4 { margin: 8px 6px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .side-item {
   display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 6px;
@@ -344,4 +350,5 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
   .browse-side { display: none; position: static; width: 100%; flex: none; max-height: 45vh; }
   .browse-side.open { display: block; }
   .side-item { padding: 9px 10px; font-size: 15px; }
+  .browse-edit { display: none; } /* mobile edits on its own page */
 }
