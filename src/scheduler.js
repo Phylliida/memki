@@ -504,17 +504,19 @@ export class Scheduler {
   }
 
   /**
-   * Gather the cards due now in a deck (and its subdecks), grouped and capped at
-   * the deck's per-day new/review limits minus what's already been studied today
-   * (tracked in the deck's newToday/revToday counters). Uses a fixed study order
-   * (due learning, then reviews, then new).
+   * Gather the cards due now in a deck (and its subdecks), grouped and capped
+   * v3-style: every deck from a card's own deck up to the selected deck has a
+   * per-day new/review budget (its config limit minus what's been studied today
+   * per its newToday/revToday counters), and interday learning cards consume
+   * the review budget. Study order: intraday learning + due interday learning,
+   * then reviews with new cards mixed per conf.newSpread, then learn-ahead.
    * @returns {{ learning: Card[], review: Card[], new: Card[], all: Card[] }}
    */
   queue(deckId, { now } = {}) {
     const nowS = now ?? this.now;
     const learnAheadSecs = this.col.conf?.collapseTime ?? 1200;
     const dids = this._deckAndDescendants(deckId);
-    const learning = [], learningAhead = [], review = [], newCards = [];
+    const learning = [], learningAhead = [], dayLearning = [], review = [], newCards = [];
     for (const card of this.col.cards.values()) {
       if (!dids.has(card.did)) continue;
       switch (card.queue) {
@@ -523,7 +525,7 @@ export class Scheduler {
           else if (card.due <= nowS + learnAheadSecs) learningAhead.push(card); // learn-ahead
           break;
         case CardQueue.DayLearning:
-          if (card.due <= this.daysElapsed) learning.push(card);
+          if (card.due <= this.daysElapsed) dayLearning.push(card);
           break;
         case CardQueue.Review:
           if (card.due <= this.daysElapsed) review.push(card);
@@ -537,24 +539,86 @@ export class Scheduler {
     const byDue = (a, b) => a.due - b.due;
     learning.sort(byDue);
     learningAhead.sort(byDue);
+    dayLearning.sort(byDue);
     review.sort(byDue);
     newCards.sort(byDue);
 
-    const deck = this.col.decks[String(deckId)];
-    const isDyn = !!deck?.dyn;
     // Filtered decks ignore per-day limits and "studied today" counters.
-    const dc = this.deckConfigFor({ did: deckId });
-    const newPerDay = isDyn ? Infinity : (dc.new?.perDay ?? 20);
-    const revPerDay = isDyn ? Infinity : (dc.rev?.perDay ?? 200);
-    const newDone = isDyn || !deck ? 0 : this._counterValue(deck, "newToday");
-    const revDone = isDyn || !deck ? 0 : this._counterValue(deck, "revToday");
-    const cappedNew = newCards.slice(0, Math.max(0, newPerDay - newDone));
-    const cappedReview = review.slice(0, Math.max(0, revPerDay - revDone));
+    let cappedDayLearn = dayLearning, cappedReview = review, cappedNew = newCards;
+    if (!this.col.decks[String(deckId)]?.dyn) {
+      const budget = this._limitBudget(deckId);
+      cappedDayLearn = dayLearning.filter((c) => budget.take(c.did, "rev"));
+      cappedReview = review.filter((c) => budget.take(c.did, "rev"));
+      cappedNew = newCards.filter((c) => budget.take(c.did, "new"));
+    }
+    const learn = [...learning, ...cappedDayLearn];
     return {
-      learning, review: cappedReview, new: cappedNew,
+      learning: learn, review: cappedReview, new: cappedNew,
       // Learn-ahead cards are studied early only once everything else is done.
-      all: [...learning, ...cappedReview, ...cappedNew, ...learningAhead],
+      all: [...learn, ...this._mixNewAndReview(cappedReview, cappedNew), ...learningAhead],
     };
+  }
+
+  /**
+   * Per-deck daily budgets for the v3 limit rule: a card is admitted only if
+   * its deck and every ancestor up to (and including) the selected deck still
+   * have new/review budget, and admitting it spends one from each.
+   */
+  _limitBudget(rootId) {
+    const root = this.col.decks[String(rootId)];
+    const nameToDid = new Map(Object.entries(this.col.decks).map(([id, d]) => [d.name, Number(id)]));
+    const remaining = new Map();
+    const budgetOf = (did) => {
+      if (!remaining.has(did)) {
+        const deck = this.col.decks[String(did)];
+        const dc = this.deckConfigFor({ did });
+        remaining.set(did, deck ? {
+          new: Math.max(0, (dc.new?.perDay ?? 20) - this._counterValue(deck, "newToday")),
+          rev: Math.max(0, (dc.rev?.perDay ?? 200) - this._counterValue(deck, "revToday")),
+        } : { new: Infinity, rev: Infinity });
+      }
+      return remaining.get(did);
+    };
+    const chains = new Map(); // card deck id -> deck ids from selected root down to it
+    const chainFor = (did) => {
+      if (chains.has(did)) return chains.get(did);
+      const chain = [];
+      const deckName = this.col.decks[String(did)]?.name;
+      if (deckName && root?.name) {
+        const parts = deckName.split("::");
+        for (let i = 1; i <= parts.length; i++) {
+          const prefix = parts.slice(0, i).join("::");
+          if (prefix.length < root.name.length || !prefix.startsWith(root.name)) continue;
+          const pid = nameToDid.get(prefix);
+          if (pid != null) chain.push(pid);
+        }
+      }
+      chains.set(did, chain.length ? chain : [did]);
+      return chains.get(did);
+    };
+    return {
+      take: (did, kind) => {
+        const budgets = chainFor(did).map(budgetOf);
+        if (budgets.some((b) => b[kind] <= 0)) return false;
+        for (const b of budgets) b[kind] -= 1;
+        return true;
+      },
+    };
+  }
+
+  /** Order reviews and new cards per conf.newSpread (0 mix, 1 last, 2 first). */
+  _mixNewAndReview(review, newCards) {
+    const spread = this.col.conf?.newSpread ?? 0;
+    if (spread === 2) return [...newCards, ...review];
+    if (spread === 1 || !newCards.length || !review.length) return [...review, ...newCards];
+    const out = [];
+    let ri = 0, ni = 0;
+    while (ri < review.length || ni < newCards.length) {
+      const rf = ri < review.length ? ri / review.length : Infinity;
+      const nf = ni < newCards.length ? ni / newCards.length : Infinity;
+      out.push(rf <= nf ? review[ri++] : newCards[ni++]);
+    }
+    return out;
   }
 
   /**
@@ -739,12 +803,23 @@ export class Scheduler {
     if (!next) throw new Error(`invalid rating: ${rating}`);
 
     const lastInterval = asRevlogInterval(intervalKindOf(current));
+    const wasDayLearning = card.queue === CardQueue.DayLearning;
     card.reps += 1;
     if (this.fsrsEnabled) card.desiredRetention = this.desiredRetentionFor(this.deckConfigFor(card));
-    this._bumpStudyCounters(card.did, current.kind); // count against daily new/review caps
+    // Interday learning cards consume the review budget in v3.
+    this._bumpStudyCounters(card.did, wasDayLearning ? "review" : current.kind);
     this._applyState(card, next);
-    if (stateLeeched(next) && (this.deckConfigFor(card).lapse?.leechAction ?? 0) === 0) {
-      card.queue = CardQueue.Suspended;
+    if (stateLeeched(next)) {
+      // Anki always tags the note "leech"; the suspend action additionally suspends.
+      const note = this.col.notes.get(card.nid);
+      if (note && !note.tags.includes("leech")) {
+        note.tags.push("leech");
+        note.mod = this.now;
+        note.usn = -1;
+      }
+      if ((this.deckConfigFor(card).lapse?.leechAction ?? 0) === 0) {
+        card.queue = CardQueue.Suspended;
+      }
     }
     card.mod = this.now;
     card.usn = -1;

@@ -493,6 +493,7 @@ function renderStudy() {
     return;
   }
   const { note, noteType } = noteTypeAndNote(card);
+  state.qShownAt = Date.now(); // for revlog answer-duration tracking
   const showAnswerBtn = el("button", { class: "show-answer", onclick: () => showAnswer() }, "Show Answer");
   if (noteType.ossIO) {
     show(back, occlusionFace(note, card.ord, "q"), showAnswerBtn, reviewMoreBar());
@@ -554,12 +555,16 @@ async function gradeCard(rating) {
     ),
   };
   const sched = new Scheduler(state.col, { fuzz: true });
-  const entry = sched.answerCard(card, rating);
+  const entry = sched.answerCard(card, rating, {
+    takenMs: state.qShownAt ? Date.now() - state.qShownAt : 0,
+  });
   snapshot.entryId = entry.id;
   state.lastAction = snapshot;
   updateUndoButton();
-  // Persist the answered card AND its (possibly buried) siblings.
+  // Persist the answered card AND its (possibly buried) siblings; the note too,
+  // since a leech may have just been tagged.
   for (const c of state.col.cardsForNote(card.nid)) await putCard(state.db, c);
+  await putNote(state.db, state.col.notes.get(card.nid));
   await putRevlog(state.db, entry);
   await putMeta(state.db, state.col); // persist deck daily counters (newToday/revToday)
   renderStudy();
@@ -607,10 +612,13 @@ function addNoteWithCards(model, fields, did, tags = []) {
   } else {
     ords = model.tmpls.map((t) => t.ord);
   }
+  const deck = state.col.decks[String(did)];
+  const dc = state.col.dconf[String(deck?.conf ?? 1)];
+  const randomOrder = (dc?.new?.order ?? 1) === 0; // 0 = random, 1 = sequential
   for (const ord of ords) {
     const due = state.col.conf.nextPos ?? 1;
     state.col.conf.nextPos = due + 1;
-    state.col.addCard(new Card({ nid: note.id, did, ord, due }));
+    state.col.addCard(new Card({ nid: note.id, did, ord, due: randomOrder ? 1 + Math.floor(Math.random() * due) : due }));
   }
   return note;
 }
