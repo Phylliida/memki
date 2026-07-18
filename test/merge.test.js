@@ -63,6 +63,63 @@ test("older imports do not overwrite newer existing notes", () => {
   assert.deepEqual([...target.notes.values()].find((n) => n.guid === tn.guid).fields, ["2+2", "newer answer"]);
 });
 
+test("decks merge by name; new decks are added, not duplicated", () => {
+  const src = source();
+  src.addDeck("Spanish");
+  const spanishId = Object.values(src.decks).find((d) => d.name === "Spanish").id;
+  for (const c of src.cards.values()) c.did = spanishId;
+
+  const target = Collection.createDefault();
+  mergeCollection(target, src);
+
+  // "Default" matched by name (no duplicate); "Spanish" added.
+  const names = Object.values(target.decks).map((d) => d.name).sort();
+  assert.deepEqual(names, ["Default", "Spanish"]);
+  const tSpanish = Object.values(target.decks).find((d) => d.name === "Spanish");
+  for (const c of target.cards.values()) assert.equal(c.did, tSpanish.id);
+});
+
+test("a same-name deck with a clashing id maps cards into the existing deck", () => {
+  const target = Collection.createDefault();
+  target.addDeck("Spanish");
+  const tid = Object.values(target.decks).find((d) => d.name === "Spanish").id;
+
+  const src = source();
+  const sDeck = src.addDeck("Spanish");
+  for (const c of src.cards.values()) c.did = sDeck.id;
+
+  mergeCollection(target, src);
+  assert.equal(Object.values(target.decks).filter((d) => d.name === "Spanish").length, 1);
+  for (const c of target.cards.values()) assert.equal(c.did, tid);
+});
+
+test("review due dates shift by the collections' creation-day offset", () => {
+  const src = source();
+  const target = Collection.createDefault();
+  src.crt = target.crt - 100 * 86400; // source collection created 100 days earlier
+
+  // A review card due on source-day 130 (i.e. 30 days from source-day 100 = today).
+  const [note] = [...src.notes.values()];
+  const rev = [...src.cards.values()].find((c) => c.nid === note.id);
+  rev.type = 2;
+  rev.queue = 2;
+  rev.due = 130;
+
+  mergeCollection(target, src);
+  const merged = [...target.cards.values()].find((c) => c.queue === 2);
+  assert.equal(merged.due, 30); // still due 30 days from target-day 0 = today
+});
+
+test("new cards' position-based due is not shifted", () => {
+  const src = source();
+  const target = Collection.createDefault();
+  src.crt = target.crt - 100 * 86400;
+  mergeCollection(target, src);
+  for (const c of [...target.cards.values()].filter((c) => c.type === 0)) {
+    assert.ok(c.due < 1000, `new-card position preserved (got ${c.due})`);
+  }
+});
+
 test("id collisions get fresh ids without dropping data", () => {
   const target = Collection.createDefault();
   const mid = Object.values(target.models).find((m) => m.name === "Basic").id;

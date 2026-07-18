@@ -12,7 +12,7 @@ import { Rating } from "../src/fsrs.js";
 import { stripHtml } from "../src/text.js";
 import {
   openCollectionDB, loadCollection, saveCollection,
-  putCard, putNote, putRevlog, putMeta, saveMedia, loadMedia, clearAll, deleteNoteAndCards, deleteRevlog,
+  putCard, putNote, putRevlog, putMeta, saveMedia, loadMedia, deleteNoteAndCards, deleteRevlog,
 } from "../src/storage.js";
 
 const SQL_CDN = "https://cdn.jsdelivr.net/npm/sql.js@1.14.1/dist/";
@@ -71,13 +71,86 @@ function tbBtn(label, title, onClick) {
   return el("button", { type: "button", class: "rich-tb", title, onclick: (e) => { e.preventDefault(); onClick(); } }, label);
 }
 
+/** Store a dropped/pasted file in the media store; returns its media name. */
+async function storeMediaFile(file) {
+  const extRaw = (file.name?.includes(".") ? file.name.split(".").pop() : file.type.split("/")[1]) || "png";
+  const ext = extRaw.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8) || "png";
+  const name = `img-${state.col.nextId()}.${ext}`;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  state.media.set(name, bytes);
+  state.mediaUrls.delete(name);
+  await saveMedia(state.db, new Map([[name, bytes]]));
+  return name;
+}
+
+// Fields store media as <img src="filename">. In the editor the image must
+// actually display, so srcs referencing stored media are rewritten to blob URLs
+// tagged with data-name, and swapped back to bare filenames on read.
+function editorDisplayHtml(html) {
+  return html.replace(/(<img\b[^>]*?src\s*=\s*)(["']?)([^"'>\s]+)\2/gi, (m, pre, _q, src) => {
+    const name = safeDecode(src);
+    if (!state.media.has(name)) return m;
+    return `${pre}"${mediaUrl(name)}" data-name="${encodeURIComponent(name)}"`;
+  });
+}
+
+/** Move the caret to the point (x, y), clamped to stay inside `container`. */
+function placeCaretAt(container, x, y) {
+  let range = null;
+  if (document.caretRangeFromPoint) {
+    range = document.caretRangeFromPoint(x, y);
+  } else if (document.caretPositionFromPoint) {
+    const p = document.caretPositionFromPoint(x, y);
+    if (p) {
+      range = document.createRange();
+      range.setStart(p.offsetNode, p.offset);
+    }
+  }
+  if (!range || !container.contains(range.startContainer)) {
+    range = document.createRange();
+    range.selectNodeContents(container);
+    range.collapse(false);
+  }
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+const imageFilesOf = (dt) => [...(dt?.files ?? [])].filter((f) => f.type.startsWith("image/"));
+
 /** A rich-text editor over a field's HTML. Returns { el, getHTML, setHTML, focus }. */
 function richEditor(initialHtml = "") {
   const area = el("div", { class: "rich", contenteditable: "true" });
-  area.innerHTML = initialHtml;
+  area.innerHTML = editorDisplayHtml(initialHtml);
   const raw = el("textarea", { class: "rich-raw mono" });
   raw.style.display = "none";
   let rawMode = false;
+
+  /** The field HTML to store: the editor DOM with media srcs back to filenames. */
+  const storageHtml = () => {
+    const clone = area.cloneNode(true);
+    for (const img of clone.querySelectorAll("img[data-name]")) {
+      img.setAttribute("src", safeDecode(img.getAttribute("data-name")));
+      img.removeAttribute("data-name");
+    }
+    return clone.innerHTML;
+  };
+
+  const insertImage = async (file) => {
+    if (rawMode) return;
+    const name = await storeMediaFile(file);
+    area.focus();
+    const sel = window.getSelection();
+    if (!sel.rangeCount || !area.contains(sel.getRangeAt(0).startContainer)) {
+      const r = document.createRange();
+      r.selectNodeContents(area);
+      r.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+    document.execCommand("insertHTML", false,
+      `<img src="${mediaUrl(name)}" data-name="${encodeURIComponent(name)}">`);
+  };
 
   const cmd = (c, val = null) => { area.focus(); document.execCommand(c, false, val); };
   const wrapCloze = () => {
@@ -92,12 +165,35 @@ function richEditor(initialHtml = "") {
   };
   const toggleRaw = () => {
     rawMode = !rawMode;
-    if (rawMode) { raw.value = area.innerHTML; raw.style.display = ""; area.style.display = "none"; }
-    else { area.innerHTML = raw.value; raw.style.display = "none"; area.style.display = ""; }
+    if (rawMode) { raw.value = storageHtml(); raw.style.display = ""; area.style.display = "none"; }
+    else { area.innerHTML = editorDisplayHtml(raw.value); raw.style.display = "none"; area.style.display = ""; }
   };
 
   area.addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "c") { e.preventDefault(); wrapCloze(); }
+  });
+
+  // Drag-and-drop and paste images straight into the field.
+  area.addEventListener("dragover", (e) => {
+    if ([...(e.dataTransfer?.items ?? [])].some((i) => i.kind === "file")) {
+      e.preventDefault();
+      area.classList.add("dropping");
+    }
+  });
+  area.addEventListener("dragleave", () => area.classList.remove("dropping"));
+  area.addEventListener("drop", async (e) => {
+    area.classList.remove("dropping");
+    const files = imageFilesOf(e.dataTransfer);
+    if (!files.length) return;
+    e.preventDefault();
+    placeCaretAt(area, e.clientX, e.clientY);
+    for (const f of files) await insertImage(f);
+  });
+  area.addEventListener("paste", async (e) => {
+    const files = imageFilesOf(e.clipboardData);
+    if (!files.length) return;
+    e.preventDefault();
+    for (const f of files) await insertImage(f);
   });
 
   const toolbar = el("div", { class: "rich-toolbar" },
@@ -108,12 +204,17 @@ function richEditor(initialHtml = "") {
     tbBtn("1.", "Numbered list", () => cmd("insertOrderedList")),
     tbBtn("T̶", "Clear formatting", () => cmd("removeFormat")),
     tbBtn("[…]", "Cloze (Ctrl+Shift+C)", wrapCloze),
+    tbBtn("🖼", "Insert image (or drag & drop / paste one)", () => {
+      const inp = el("input", { type: "file", accept: "image/*" });
+      inp.addEventListener("change", () => { if (inp.files[0]) insertImage(inp.files[0]); });
+      inp.click();
+    }),
     tbBtn("</>", "Edit HTML", toggleRaw),
   );
   return {
     el: el("div", { class: "rich-wrap" }, toolbar, area, raw),
-    getHTML: () => (rawMode ? raw.value : area.innerHTML),
-    setHTML: (h) => { area.innerHTML = h; raw.value = h; },
+    getHTML: () => (rawMode ? raw.value : storageHtml()),
+    setHTML: (h) => { area.innerHTML = editorDisplayHtml(h); raw.value = h; },
     focus: () => area.focus(),
   };
 }
@@ -133,6 +234,11 @@ function mimeFor(name) {
   return MIME[ext] || "application/octet-stream";
 }
 
+/** decodeURIComponent that tolerates stray '%' in real-world filenames. */
+function safeDecode(s) {
+  try { return decodeURIComponent(s); } catch { return s; }
+}
+
 function mediaUrl(name) {
   if (!state.mediaUrls.has(name)) {
     const bytes = state.media.get(name);
@@ -144,7 +250,7 @@ function mediaUrl(name) {
 
 function resolveMedia(html) {
   return html.replace(/(src\s*=\s*)(["']?)([^"'>\s]+)\2/gi, (m, pre, _q, name) => {
-    const url = mediaUrl(decodeURIComponent(name));
+    const url = mediaUrl(safeDecode(name));
     return url ? `${pre}"${url}"` : m;
   });
 }
@@ -1216,36 +1322,24 @@ async function loadSql() {
 }
 
 async function doImport(file) {
-  // Merge into the current collection (add new + update by GUID) unless the
-  // user chooses to replace everything.
-  const merge = state.col.cards.size > 0
-    ? confirm("Merge this deck into your current collection?\n\nOK = merge (add new cards, update existing by GUID)\nCancel = replace your entire collection")
-    : false;
+  // Always merge into the current collection: imported decks are added as new
+  // decks (matched by name), notes dedup/update by GUID. Existing cards'
+  // scheduling is never touched.
   setStatus("Importing…");
   try {
     const { importPackage } = await import("../src/apkg.js");
+    const { mergeCollection } = await import("../src/merge.js");
     const SQL = await loadSql();
     const buf = new Uint8Array(await file.arrayBuffer());
     const { collection, media } = importPackage(buf, { SQL });
 
-    if (merge) {
-      const { mergeCollection } = await import("../src/merge.js");
-      const r = mergeCollection(state.col, collection);
-      for (const [name, bytes] of media) state.media.set(name, bytes);
-      state.mediaUrls.clear();
-      await saveCollection(state.db, state.col);
-      await saveMedia(state.db, media);
-      setStatus(`Merged: ${r.added} added, ${r.updated} updated.`);
-    } else {
-      sanitizeCurModel(collection);
-      state.col = collection;
-      state.media = media;
-      state.mediaUrls.clear();
-      await clearAll(state.db);
-      await saveCollection(state.db, collection);
-      await saveMedia(state.db, media);
-      setStatus(`Imported ${collection.cards.size} cards.`);
-    }
+    const r = mergeCollection(state.col, collection);
+    for (const [name, bytes] of media) state.media.set(name, bytes);
+    state.mediaUrls.clear();
+    sanitizeCurModel(state.col);
+    await saveCollection(state.db, state.col);
+    await saveMedia(state.db, media);
+    setStatus(`Imported: ${r.added} notes added, ${r.updated} updated.`);
     renderDecks();
   } catch (e) {
     setStatus(`Import failed: ${e.message}`);
