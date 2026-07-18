@@ -513,7 +513,12 @@ export class Collection {
         ivl: snap.ivl, factor: snap.factor, reps: snap.reps, lapses: snap.lapses,
         left: snap.left, data: snap.data ?? "",
       };
-      if (snap.id != null && !this.cards.has(snap.id)) props.id = snap.id;
+      if (snap.id != null && !this.cards.has(snap.id)) {
+        props.id = snap.id;
+        // The old removal tombstoned this id; clear it so a sync's
+        // delete-wins pass doesn't kill the restored card.
+        this.graves = this.graves.filter((g) => !(g.type === 0 && g.oid === snap.id));
+      }
       return this.addCard(new Card(props));
     }
     const due = this.conf.nextPos ?? 1;

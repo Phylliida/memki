@@ -20,8 +20,9 @@ export back to `.apkg`.
 |---|---|
 | FSRS-6 memory model (`src/fsrs.js`) | ✅ matches fsrs-rs golden vectors |
 | Data model (col/notes/cards/revlog/decks/models) | ✅ schema-v11; csum/base91/GUID match rslib |
-| `.apkg` / `.colpkg` import + export | ✅ round-trips; legacy **and modern (schema-18) packages**; import adds decks (notes dedup by GUID, decks match by name) |
-| JSON backup / restore | ✅ one-file backup of collection + media |
+| `.apkg` / `.colpkg` import + export | ✅ legacy **and modern (schema-18) packages**; import adds decks (notes dedup by GUID, decks match by name). Export is a **lossy compatibility snapshot** — see Formats |
+| JSON backup / restore | ✅ one-file backup of collection + media — **the native format** |
+| Sync merge engine | ✅ static-file sync core: deterministic, order-insensitive merge (revlog unions, notes by GUID, cards by note/deck/ord, delete-wins) |
 | CSV / TSV import | ✅ delimiter detect, header, column→field mapping |
 | Rich-text field editor | ✅ contenteditable (bold/italic/lists/cloze/HTML toggle, **drag-drop / paste images & audio**) |
 | Day rollover | ✅ local days, configurable rollover hour (default 4 AM), creationOffset |
@@ -40,10 +41,20 @@ export back to `.apkg`.
 
 Not implemented (by request): AnkiWeb sync, FSRS optimizer, add-ons, TTS.
 
+## Formats
+
+**The JSON backup is the native format** — it captures everything, including
+the parts of our model that Anki's cannot express: non-exclusive flags, notes
+living in multiple decks, and per-deck scheduling memory. **`.apkg` export is a
+lossy compatibility snapshot** for moving cards into Anki: multi-flags degrade
+to the lowest flag, and the per-deck memory rides opaquely in `notes.data`.
+Prefer JSON for backups and device-to-device transfer; use `.apkg` to share
+decks with Anki users.
+
 ## Run the app
 
 ```bash
-npm run serve   # static server on :8000 (python3 -m http.server)
+npm run serve   # no-cache static server on :8000 (web/serve.py)
 # then open http://localhost:8000/web/
 ```
 

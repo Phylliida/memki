@@ -54,7 +54,7 @@ main {
 /* Clickable chrome shouldn't be text-selectable (double-click on a chip was
    selecting its label). Card faces and form fields stay selectable. */
 button, .side-item, .ftab, .deck, .browse-row, .crumbs, .rate,
-.decks-head, .more-bar, .note-actions, .io-maskchip, .rich-toolbar {
+.decks-head, .more-bar, .io-maskchip, .rich-toolbar {
   user-select: none;
   -webkit-user-select: none;
 }
@@ -120,9 +120,6 @@ hr#answer { border: none; border-top: 1px solid #ccc; margin: 20px 0; }
   font-size: 18px; border: 1px solid var(--border); border-radius: 6px;
   background: #fff; color: #000;
 }
-.typeans-result { font-size: 20px; margin: 10px 0; }
-.typeans-result.correct, .typed-good { color: #0a7d28; }
-.typed-bad { color: #c0392b; text-decoration: line-through; }
 
 .study-controls { margin-top: 18px; display: flex; justify-content: center; gap: 10px; }
 .rate { flex: 1; max-width: 150px; display: flex; flex-direction: column; gap: 2px; align-items: center; padding: 10px; }
@@ -187,15 +184,11 @@ a.hint { display: inline-block; color: var(--accent); }
 .flag-dot.f5 { color: #f783ac; }
 .flag-dot.f6 { color: #3bc9db; }
 .flag-dot.f7 { color: #b197fc; }
-.more-bar .flag-sel { max-width: 130px; }
 .ab-row { display: flex; gap: 10px; flex-wrap: wrap; }
 .stock-row { align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted, #999); }
 .rich-raw { width: 100%; min-height: 80px; border: none; border-radius: 0; }
 .io-preview { font-size: 12px; margin-top: 8px; word-break: break-word; }
 
-/* Card actions */
-.note-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.note-actions .na-group { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; }
 .more-bar { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 14px; }
 .more-bar .icon { font-size: 13px; color: var(--muted); }
 
@@ -461,7 +454,6 @@ button .ic { margin-right: 2px; }
   .count { min-width: 22px; }
   button.icon { padding: 8px; }        /* bigger touch targets */
   .br-deck { display: none; }          /* tighter browse rows */
-  .note-actions .na-group { width: 100%; }
 
   /* Browse sidebar collapses behind the Filters toggle. */
   .browse-layout { flex-direction: column; }
