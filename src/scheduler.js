@@ -20,6 +20,7 @@
 import { CardType, CardQueue, RevlogType, Revlog } from "./model.js";
 import { FSRS, DEFAULT_PARAMETERS } from "./fsrs.js";
 import { nowMs, nowSec } from "./ids.js";
+import { collectionTiming } from "./timing.js";
 
 const DAY = 86400;
 const INITIAL_EASE_FACTOR = 2.5;
@@ -402,10 +403,11 @@ export class Scheduler {
     this.fuzz = opts.fuzz ?? false; // off by default → deterministic intervals
     this.fsrsEnabled = collection.conf?.fsrs === true;
     this.fsrsParameters = opts.fsrsParameters ?? collection.conf?.fsrsParams6 ?? DEFAULT_PARAMETERS;
-    // timing: crt is the rollover anchor (Anki aligns it).
-    const delta = this.now - (collection.crt ?? 0);
-    this.daysElapsed = Math.floor(delta / DAY);
-    this.secsUntilRollover = DAY - (((delta % DAY) + DAY) % DAY);
+    // Timing: local scheduling days with a rollover hour (default 4 AM),
+    // matching rslib's v2/v3 timing rather than raw 86400s multiples of crt.
+    const timing = collectionTiming(collection, this.now);
+    this.daysElapsed = timing.daysElapsed;
+    this.secsUntilRollover = timing.secsUntilRollover;
   }
 
   /** Resolve the deck options group (dconf) for a card's deck. */

@@ -11,6 +11,7 @@
 
 import { joinFields, splitFields, fieldChecksum, sortField } from "./text.js";
 import { newGuid, nowSec, nowMs } from "./ids.js";
+import { tzOffsetMinutes, localDayStart } from "./timing.js";
 
 // --- Enums (exact integer encodings) ---
 
@@ -225,7 +226,8 @@ export function defaultConf() {
   return {
     activeDecks: [1], addToCur: true, collapseTime: 1200, curDeck: 1,
     curModel: null, dueCounts: true, estTimes: true, newBury: true,
-    newSpread: 0, nextPos: 1, sortBackwards: false, sortType: "noteFld", timeLim: 0,
+    newSpread: 0, nextPos: 1, rollover: 4, sortBackwards: false,
+    sortType: "noteFld", timeLim: 0,
   };
 }
 
@@ -330,8 +332,11 @@ export class Collection {
   /** A fresh, empty collection with the Default deck, default options, and Basic note type. */
   static createDefault() {
     const col = new Collection();
-    const startOfDay = Math.floor(Date.now() / 86400000) * 86400; // crt at a day boundary (UTC)
-    col.crt = startOfDay;
+    // crt at the start of the *local* day (midnight), like Anki; the rollover
+    // hour in conf shifts the scheduling-day boundary (default 4 AM).
+    const now = Math.floor(Date.now() / 1000);
+    col.crt = localDayStart(now);
+    col.conf.creationOffset = tzOffsetMinutes(now);
     const deck = defaultDeck(1, "Default");
     col.decks["1"] = deck;
     col.dconf["1"] = defaultDeckConfig(1, "Default");

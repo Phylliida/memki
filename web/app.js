@@ -1286,7 +1286,7 @@ function barChart(values, color, height = 90) {
 
 function renderStats() {
   state.card = null;
-  const today = Math.floor((Math.floor(Date.now() / 1000) - (state.col.crt ?? 0)) / 86400);
+  const today = new Scheduler(state.col).daysElapsed;
   const s = collectionStats(state.col, today, 30);
   const c = s.counts;
   const stat = (label, value, cls = "") => el("div", { class: `stat ${cls}` },

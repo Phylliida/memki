@@ -18,6 +18,7 @@
 // which builds the ctx from a collection.
 
 import { CardType, CardQueue } from "./model.js";
+import { collectionTiming } from "./timing.js";
 
 const lc = (x) => (x ?? "").toLowerCase();
 
@@ -209,7 +210,7 @@ export function searchContext(col, { now } = {}) {
   const nowSec = now ?? Math.floor(Date.now() / 1000);
   return {
     col,
-    today: Math.floor((nowSec - (col.crt ?? 0)) / 86400),
+    today: collectionTiming(col, nowSec).daysElapsed,
     nowSec,
     nowMs: nowSec * 1000,
     note: (card) => col.notes.get(card.nid),
