@@ -51,6 +51,14 @@ main {
 .study-controls, .more-bar { max-width: 820px; margin-left: auto; margin-right: auto; }
 .form { max-width: 900px; }
 
+/* Clickable chrome shouldn't be text-selectable (double-click on a chip was
+   selecting its label). Card faces and form fields stay selectable. */
+button, .side-item, .ftab, .deck, .browse-row, .crumbs, .rate,
+.decks-head, .more-bar, .note-actions, .io-maskchip, .rich-toolbar {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 button {
   background: var(--panel-2);
   color: var(--text);
