@@ -178,3 +178,16 @@ test("rated:N:0 finds manual reschedules; plain rated:N excludes them", () => {
   assert.equal(searchCards(col, "rated:1:0").length, 1);
   assert.equal(searchCards(col, "rated:1").length, 0);
 });
+
+test("flag: accepts color names as well as numbers", () => {
+  const { col, mk } = build2();
+  mk(undefined, { flags: 1 }); // red
+  mk(undefined, { flags: 6 }); // turquoise
+  mk(undefined, { flags: 0 });
+  assert.equal(searchCards(col, "flag:red").length, 1);
+  assert.equal(searchCards(col, "flag:turquoise").length, 1);
+  assert.equal(searchCards(col, "flag:turquise").length, 1); // tolerated spelling
+  assert.equal(searchCards(col, "flag:none").length, 1);
+  assert.equal(searchCards(col, "flag:1").length, 1); // numbers still work
+  assert.equal(searchCards(col, "flag:mauve").length, 0);
+});

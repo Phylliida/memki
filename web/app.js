@@ -931,7 +931,7 @@ function renderBrowse(query = "") {
   state.card = null;
   const search = el("input", {
     class: "search", type: "search", value: query,
-    placeholder: 'Search — e.g. deck:Spanish tag:verb is:due prop:ivl>21 -flag:1',
+    placeholder: 'Search — e.g. deck:Spanish tag:verb is:due prop:ivl>21 -flag:red',
     oninput: (e) => { state.browseQuery = e.target.value; renderRows(e.target.value); },
   });
   const list = el("div", { class: "browse-list" });
@@ -973,7 +973,8 @@ function renderBrowse(query = "") {
     ),
     section("Flags",
       ...FLAG_NAMES.map((name, i) =>
-        sideItem(name, `flag:${i}`, i ? el("span", { class: `flag-dot f${i}` }, "⚑") : null)),
+        sideItem(name, `flag:${i ? name.toLowerCase() : "none"}`,
+          i ? el("span", { class: `flag-dot f${i}` }, "⚑") : null)),
     ),
     section("Decks",
       ...decks.map((d) => {

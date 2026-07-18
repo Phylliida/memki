@@ -15,7 +15,8 @@
 //   added:7  edited:7  introduced:7   (last N scheduling days)
 //   rated:7  rated:7:1  answered in the last N days (optionally with button)
 //   card:1             template ordinal (1-based)
-//   flag:1             flag number (0–7)
+//   flag:red           flag by color name (red orange green blue pink
+//                      turquoise purple, none) or number (0–7)
 //
 // Pure module: compileSearch(query) -> (card, ctx) => bool, and searchCards()
 // which builds the ctx from a collection.
@@ -220,7 +221,11 @@ function termPredicate(s) {
       case "re": return rePred(val);
       case "note": return notePred(val);
       case "card": { const n = Number(val); return Number.isFinite(n) ? (card) => card.ord === n - 1 : () => false; }
-      case "flag": { const n = Number(val); return Number.isFinite(n) ? (card) => (card.flags & 7) === n : () => false; }
+      case "flag": {
+        const FLAG_COLORS = { none: 0, red: 1, orange: 2, green: 3, blue: 4, pink: 5, turquoise: 6, turquise: 6, purple: 7 };
+        const n = lc(val) in FLAG_COLORS ? FLAG_COLORS[lc(val)] : Number(val);
+        return Number.isFinite(n) ? (card) => (card.flags & 7) === n : () => false;
+      }
       default: return fieldPred(key, val); // unknown key → treat as a field name (Anki)
     }
   }
