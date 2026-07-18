@@ -170,3 +170,11 @@ test("deck: supports wildcards", () => {
   assert.equal(searchCards(col, '"deck:Lang::*"').length, 2);
   assert.equal(searchCards(col, '"deck:*French"').length, 1);
 });
+
+test("rated:N:0 finds manual reschedules; plain rated:N excludes them", () => {
+  const { col, mk } = build2();
+  const c1 = mk();
+  col.addRevlog(new Revlog({ id: Date.now() - 1000, cid: c1.id, ease: 0 })); // manual
+  assert.equal(searchCards(col, "rated:1:0").length, 1);
+  assert.equal(searchCards(col, "rated:1").length, 0);
+});

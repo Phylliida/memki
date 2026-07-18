@@ -904,6 +904,29 @@ function deckName(did) {
   return state.col.decks[String(did)]?.name ?? "?";
 }
 
+/** Wrap a search term in quotes when its value needs them. */
+function quoteTerm(term) {
+  return /\s/.test(term) ? `"${term}"` : term;
+}
+
+/** Build a filtered deck from a browse query and start studying it. */
+async function buildDeckFromSearch(query) {
+  let pred;
+  try { pred = compileSearch(query); } catch { setStatus("Invalid search."); return; }
+  const ctx = searchContext(state.col);
+  const sched = new Scheduler(state.col, { fuzz: true });
+  const fd = state.col.createFilteredDeck("Custom Study");
+  const count = sched.buildFiltered(fd.id, (c) => pred(c, ctx));
+  if (!count) {
+    delete state.col.decks[String(fd.id)];
+    setStatus("No cards match this filter.");
+    return;
+  }
+  await persistAll();
+  setStatus(`Custom deck: ${count} cards gathered.`);
+  startStudy(fd.id);
+}
+
 function renderBrowse(query = "") {
   state.card = null;
   const search = el("input", {
@@ -912,6 +935,61 @@ function renderBrowse(query = "") {
     oninput: (e) => { state.browseQuery = e.target.value; renderRows(e.target.value); },
   });
   const list = el("div", { class: "browse-list" });
+
+  // --- sidebar: click sets the search; Ctrl/⌘-click ANDs it on ---
+  const setQuery = (q, additive) => {
+    const next = additive && search.value.trim() ? `${search.value.trim()} ${q}` : q;
+    search.value = next;
+    state.browseQuery = next;
+    renderRows(next);
+  };
+  const sideItem = (label, q, extra = null) =>
+    el("div", { class: "side-item", title: q, onclick: (e) => setQuery(q, e.ctrlKey || e.metaKey) }, extra, label);
+  const section = (title, ...items) =>
+    el("div", { class: "side-sec" }, el("h4", {}, title), ...items);
+
+  const decks = Object.values(state.col.decks).sort((a, b) => a.name.localeCompare(b.name));
+  const tagSet = new Set();
+  for (const n of state.col.notes.values()) for (const t of n.tags) tagSet.add(t);
+  const tags = [...tagSet].sort((a, b) => a.localeCompare(b));
+
+  const sidebar = el("aside", { class: "browse-side" },
+    section("Today",
+      sideItem("Due today", "is:due"),
+      sideItem("Overdue", "is:due prop:due<0"),
+      sideItem("Added", "added:1"),
+      sideItem("Edited", "edited:1"),
+      sideItem("Studied", "rated:1"),
+      sideItem("First review", "introduced:1"),
+      sideItem("Rescheduled", "rated:1:0"),
+      sideItem("Again", "rated:1:1"),
+    ),
+    section("Card state",
+      sideItem("New", "is:new"),
+      sideItem("Learning", "is:learn"),
+      sideItem("Review", "is:review"),
+      sideItem("Suspended", "is:suspended"),
+      sideItem("Buried", "is:buried"),
+    ),
+    section("Flags",
+      ...FLAG_NAMES.map((name, i) =>
+        sideItem(name, `flag:${i}`, i ? el("span", { class: `flag-dot f${i}` }, "⚑") : null)),
+    ),
+    section("Decks",
+      ...decks.map((d) => {
+        const depth = d.name.split("::").length - 1;
+        return sideItem(d.name.split("::").pop(), quoteTerm(`deck:${d.name}`),
+          depth ? el("span", { class: "side-indent", style: `width:${depth * 12}px` }) : null);
+      }),
+    ),
+    section("Note types",
+      ...Object.values(state.col.models).map((m) => sideItem(m.name, quoteTerm(`note:${m.name}`))),
+    ),
+    section("Tags",
+      sideItem("Untagged", "tag:none"),
+      ...tags.map((t) => sideItem(t, quoteTerm(`tag:${t}`))),
+    ),
+  );
 
   const renderRows = (qstr) => {
     let all;
@@ -943,9 +1021,16 @@ function renderBrowse(query = "") {
 
   show(
     el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
-    el("h2", {}, "Browse"),
+    el("div", { class: "decks-head" },
+      el("h2", {}, "Browse"),
+      el("div", { class: "row" },
+        el("button", { class: "side-toggle", onclick: () => sidebar.classList.toggle("open") }, "☰ Filters"),
+        el("button", { title: "Build a filtered deck from the current search and study it",
+          onclick: () => buildDeckFromSearch(search.value) }, "⚡ Study these"),
+      ),
+    ),
     search,
-    list,
+    el("div", { class: "browse-layout" }, sidebar, list),
   );
   renderRows(query);
 }

@@ -240,6 +240,22 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 .br-state.review { color: var(--good); }
 .br-state.suspended { color: var(--again); }
 
+/* Browse sidebar */
+.browse-layout { display: flex; gap: 14px; align-items: flex-start; }
+.browse-side {
+  flex: 0 0 185px; max-height: 70vh; overflow-y: auto; position: sticky; top: 10px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px;
+}
+.browse-layout .browse-list { flex: 1; min-width: 0; }
+.side-sec h4 { margin: 8px 6px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.side-item {
+  display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 6px;
+  font-size: 13px; cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.side-item:hover { background: var(--panel-2); }
+.side-indent { display: inline-block; flex: none; }
+.side-toggle { display: none; }
+
 /* Live previews (Add Card, template editor) */
 .preview-box { margin-top: 4px; }
 .pv-count { font-size: 12px; margin: 8px 0 4px; }
@@ -304,4 +320,11 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
   button.icon { padding: 8px; }        /* bigger touch targets */
   .br-deck { display: none; }          /* tighter browse rows */
   .note-actions .na-group { width: 100%; }
+
+  /* Browse sidebar collapses behind the Filters toggle. */
+  .browse-layout { flex-direction: column; }
+  .side-toggle { display: inline-block; }
+  .browse-side { display: none; position: static; width: 100%; flex: none; max-height: 45vh; }
+  .browse-side.open { display: block; }
+  .side-item { padding: 9px 10px; font-size: 15px; }
 }

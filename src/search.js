@@ -148,15 +148,18 @@ function editedPred(val) {
 }
 
 function ratedPred(val) {
-  const m = val.match(/^(\d+)(?::([1-4]))?$/);
+  const m = val.match(/^(\d+)(?::([0-4]))?$/);
   if (!m) return () => false;
   const days = Number(m[1]);
   const ease = m[2] ? Number(m[2]) : null;
   return (card, ctx) => {
     const cutoffMs = daysBackCutoff(ctx, days) * 1000;
-    return (ctx.revlogFor(card.id) ?? []).some(
-      (r) => r.id >= cutoffMs && r.ease > 0 && (ease == null || r.ease === ease),
-    );
+    return (ctx.revlogFor(card.id) ?? []).some((r) => {
+      if (r.id < cutoffMs) return false;
+      // rated:N:0 = manual reschedules; plain rated:N = real answers only.
+      if (ease === 0) return r.ease === 0;
+      return r.ease > 0 && (ease == null || r.ease === ease);
+    });
   };
 }
 
