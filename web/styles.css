@@ -187,6 +187,10 @@ a.hint { display: inline-block; color: var(--accent); }
 .ab-row { display: flex; gap: 10px; flex-wrap: wrap; }
 .stock-row { align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted, #999); }
 .rich-raw { width: 100%; min-height: 80px; border: none; border-radius: 0; }
+.sound-strip { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 8px; border-top: 1px solid var(--border); background: var(--panel); }
+.sound-strip audio { height: 32px; max-width: 100%; }
+.sound-strip video { max-height: 90px; max-width: 200px; }
+.sound-missing { font-size: 12px; }
 .io-preview { font-size: 12px; margin-top: 8px; word-break: break-word; }
 
 .more-bar { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 14px; }

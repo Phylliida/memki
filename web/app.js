@@ -231,6 +231,7 @@ function richEditor(initialHtml = "") {
     hideHandle();
     if (rawMode) { raw.value = storageHtml(); raw.style.display = ""; area.style.display = "none"; }
     else { area.innerHTML = editorDisplayHtml(raw.value); raw.style.display = "none"; area.style.display = ""; }
+    updateSoundStrip();
   };
 
   area.addEventListener("keydown", (e) => {
@@ -260,6 +261,31 @@ function richEditor(initialHtml = "") {
     for (const f of files) await insertMedia(f);
   });
 
+  // Inline players for the field's [sound:...] tags, live-updated while
+  // editing. Volume changes on these persist like everywhere else.
+  const soundStrip = el("div", { class: "sound-strip" });
+  soundStrip.style.display = "none";
+  const updateSoundStrip = () => {
+    const html = rawMode ? raw.value : storageHtml();
+    const names = [...new Set([...html.matchAll(/\[sound:([^\]]+)\]/g)].map((m) => m[1].trim()))];
+    if (!names.length) {
+      soundStrip.replaceChildren();
+      soundStrip.style.display = "none";
+      return;
+    }
+    soundStrip.style.display = "";
+    soundStrip.replaceChildren(...names.map((name) => {
+      const url = mediaUrl(name);
+      if (!url) return el("span", { class: "muted sound-missing" }, `${name} (missing)`);
+      const isVideo = /\.(mp4|webm|mov)$/i.test(name);
+      const av = el(isVideo ? "video" : "audio", { controls: "", preload: "metadata", src: url, class: "av" });
+      av.dataset.name = encodeURIComponent(name);
+      return av;
+    }));
+    wireSoundVolumes(soundStrip);
+  };
+  const scheduleSoundStrip = debounced(updateSoundStrip, 300);
+
   const toolbar = el("div", { class: "rich-toolbar" },
     tbBtn("B", "Bold", () => cmd("bold")),
     tbBtn("I", "Italic", () => cmd("italic")),
@@ -275,7 +301,9 @@ function richEditor(initialHtml = "") {
     }),
     tbBtn("</>", "Edit HTML", toggleRaw),
   );
-  const wrap = el("div", { class: "rich-wrap" }, toolbar, area, raw);
+  const wrap = el("div", { class: "rich-wrap" }, toolbar, area, raw, soundStrip);
+  wrap.addEventListener("input", scheduleSoundStrip); // area and raw both bubble here
+  updateSoundStrip();
 
   // --- image sizing (Anki-style): click an image to select it, drag the
   // corner handle to resize (stored as a width attribute, so it persists in
@@ -385,7 +413,8 @@ function resolveMedia(html) {
 }
 
 // Anki embeds audio/video in fields as [sound:filename]; turn each into a
-// native <audio>/<video> player pointing at the media object URL.
+// native <audio>/<video> player pointing at the media object URL. data-name
+// lets the volume wiring identify the sound behind the blob URL.
 function resolveSounds(html) {
   return html.replace(/\[sound:([^\]]+)\]/g, (m, name) => {
     const file = name.trim();
@@ -393,13 +422,41 @@ function resolveSounds(html) {
     if (!url) return ""; // referenced audio not in the media store — drop it
     const isVideo = /\.(mp4|webm|mov)$/i.test(file);
     return isVideo
-      ? `<video controls src="${url}" class="av"></video>`
-      : `<audio controls preload="none" src="${url}" class="av"></audio>`;
+      ? `<video controls src="${url}" data-name="${encodeURIComponent(file)}" class="av"></video>`
+      : `<audio controls preload="none" src="${url}" data-name="${encodeURIComponent(file)}" class="av"></audio>`;
   });
+}
+
+// --- per-sound volume (persisted in conf.soundVolumes by media name) ---
+
+function soundVolume(name) {
+  return state.col.conf.soundVolumes?.[name] ?? 1;
+}
+
+const volumeSaveTimers = new Map();
+function scheduleVolumeSave(name, v) {
+  clearTimeout(volumeSaveTimers.get(name));
+  volumeSaveTimers.set(name, setTimeout(async () => {
+    volumeSaveTimers.delete(name);
+    (state.col.conf.soundVolumes ??= {})[name] = Math.round(v * 100) / 100;
+    await putMeta(state.db, state.col);
+  }, 300));
+}
+
+/** Apply saved volumes to the players under `root` and persist adjustments. */
+function wireSoundVolumes(root = view()) {
+  for (const av of root.querySelectorAll("audio[data-name], video[data-name]")) {
+    const name = safeDecode(av.dataset.name);
+    av.volume = soundVolume(name);
+    av.addEventListener("volumechange", () => {
+      if (!av.muted) scheduleVolumeSave(name, av.volume);
+    });
+  }
 }
 
 /** Best-effort autoplay of the first media player in the current face (Anki-like). */
 function autoplayFirstMedia(card) {
+  wireSoundVolumes(); // saved per-sound volumes apply before anything plays
   if (card && new Scheduler(state.col).deckConfigFor(card).autoplay === false) return;
   const av = view().querySelector("audio, video");
   if (av) av.play().catch(() => {});
@@ -638,6 +695,7 @@ function renderStudy() {
   const showAnswerBtn = el("button", { class: "show-answer", onclick: () => showAnswer() }, "Show Answer");
   if (noteType.ossIO) {
     show(back, occlusionFace(note, card.ord, "q"), showAnswerBtn, reviewMoreBar());
+    wireSoundVolumes();
     return;
   }
   applyModelCss(noteType);
@@ -673,6 +731,7 @@ function showAnswer() {
 
   if (noteType.ossIO) {
     show(crumbs, occlusionFace(note, card.ord, "a"), controls, reviewMoreBar());
+    wireSoundVolumes();
     return;
   }
   applyModelCss(noteType);
@@ -810,6 +869,7 @@ function renderAddCard() {
         el("div", { class: "card-face pv" }, el("div", { class: "card", html: displayHtml(answer) })),
       ),
     );
+    wireSoundVolumes(previewBox);
     typesetMath();
   };
   const schedulePreview = debounced(updatePreview);
@@ -2134,6 +2194,7 @@ function renderEditNoteType(mid) {
       } catch { /* a template can be transiently invalid mid-edit */ }
     }
     previewBox.replaceChildren(...parts);
+    wireSoundVolumes(previewBox);
     typesetMath();
   };
   const schedulePreview = debounced(updatePreview);
