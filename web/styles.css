@@ -286,6 +286,21 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 .pv-pair .card-face { min-height: 0; padding: 12px; font-size: 15px; }
 .pv-pair .card-face .card { padding: 12px; }
 
+/* ⓘ info bubbles on settings */
+.lbl-row { display: inline-flex; align-items: center; gap: 4px; }
+.info-btn {
+  padding: 0 4px; font-size: 13px; line-height: 1; background: transparent;
+  border: none; color: var(--muted); cursor: pointer;
+}
+.info-btn:hover { color: var(--accent); border: none; }
+.info-tip {
+  font-size: 12.5px; line-height: 1.55; color: var(--text);
+  background: var(--panel); border-left: 2px solid var(--accent);
+  border-radius: 0 6px 6px 0; padding: 7px 10px; margin: 2px 0;
+}
+.lbl-inline-info { display: inline-flex; flex-direction: column; }
+.inline-wrap { display: flex; flex-direction: column; gap: 2px; }
+
 /* Live consequences line in deck options */
 .consequences {
   font-size: 13px; line-height: 1.6;

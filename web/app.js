@@ -500,14 +500,22 @@ function renderCustomStudy(sourceDeckId) {
     startStudy(fd.id);
   };
 
+  const field = (label, input, info) => {
+    if (!info) return el("label", {}, label, input);
+    const { btn, tip } = infoBubble(info);
+    return el("label", {}, el("span", { class: "lbl-row" }, label, btn), tip, input);
+  };
   show(
     el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
     el("h2", {}, "Custom Study"),
     el("div", { class: "form" },
-      el("label", {}, "Deck", deckSel),
-      el("label", {}, "What to study", presetSel),
-      el("label", {}, "Days ahead (for 'review ahead')", nInput),
-      el("label", {}, "Search (for 'matching a search')", searchInput),
+      field("Deck", deckSel, "Which deck (including its subdecks) to gather cards from."),
+      field("What to study", presetSel,
+        "Review ahead pulls in cards due within the next N days (useful before a trip). All cards ignores daily limits entirely. Search gathers cards whose fields or tags match the text below."),
+      field("Days ahead (for 'review ahead')", nInput,
+        "How far into the future to pull reviews from when using Review ahead."),
+      field("Search (for 'matching a search')", searchInput,
+        "Plain text matched against note fields and tags. For full search syntax (deck:, flag:red, prop: …), use Browse → Create Filtered Deck instead."),
       el("p", { class: "muted" }, "Builds a temporary filtered deck. Empty it from the deck list (⏏) to return cards to their home decks."),
       el("div", { class: "row" }, el("button", { onclick: build }, "Build & Study")),
     ),
@@ -883,8 +891,12 @@ function renderImportCsv() {
       el("label", {}, "File", fileInput),
       el("div", { class: "row" }, el("label", {}, "Note type", modelSel), el("label", {}, "Deck", deckSel)),
       el("div", { class: "row" },
-        el("label", {}, "Delimiter", delimSel),
-        el("label", { class: "inline" }, headerChk, "First row is a header"),
+        el("label", {},
+          el("span", { class: "lbl-row" }, "Delimiter",
+            infoBubbleInline("The character separating columns in the file. Auto detects comma, tab, or semicolon from the first rows.")),
+          delimSel),
+        el("label", { class: "inline" }, headerChk, "First row is a header",
+          infoBubbleInline("When on, the first row is treated as column names and not imported as a note.")),
       ),
       el("h3", {}, "Column → field mapping"),
       mappingBox,
@@ -1178,6 +1190,31 @@ function renderEditNote(noteId) {
 
 // --- deck options ---
 
+/**
+ * A little ⓘ next to a setting that toggles an inline explanation.
+ * Tap-friendly (tooltips don't exist on touch); the text also lives in
+ * `title` for desktop hover.
+ */
+function infoBubble(text) {
+  const tip = el("div", { class: "info-tip" }, text);
+  tip.style.display = "none";
+  const btn = el("button", {
+    type: "button", class: "info-btn", title: text, "aria-label": "What does this do?",
+    onclick: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      tip.style.display = tip.style.display === "none" ? "" : "none";
+    },
+  }, "ⓘ");
+  return { btn, tip };
+}
+
+/** An ⓘ whose explanation reveals right where it sits (for inline labels). */
+function infoBubbleInline(text) {
+  const { btn, tip } = infoBubble(text);
+  return el("span", { class: "lbl-inline-info" }, btn, tip);
+}
+
 function renderDeckOptions(deckId) {
   state.card = null;
   const deck = state.col.decks[String(deckId)];
@@ -1290,40 +1327,82 @@ function renderDeckOptions(deckId) {
     renderDecks();
   };
 
-  const field = (label, input) => el("label", {}, label, input);
+  const field = (label, input, info) => {
+    if (!info) return el("label", {}, label, input);
+    const { btn, tip } = infoBubble(info);
+    return el("label", {}, el("span", { class: "lbl-row" }, label, btn), tip, input);
+  };
+  const inline = (chk, text, info) => {
+    const lab = el("label", { class: "inline" }, chk, text);
+    if (!info) return lab;
+    const { btn, tip } = infoBubble(info);
+    lab.append(btn);
+    return el("div", { class: "inline-wrap" }, lab, tip);
+  };
   show(
     el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
     el("h2", {}, `Options — ${deck.name}`),
     el("div", { class: "form" },
       consequences,
       el("h3", {}, "New cards"),
-      field("Learning steps (minutes)", newSteps),
-      field("New cards/day", newPerDay),
-      el("div", { class: "row" }, field("Graduating interval (days)", gradGood), field("Easy interval (days)", gradEasy)),
-      field("Starting ease", startEase),
-      field("Insertion order", newOrder),
-      el("label", { class: "inline" }, newBury, "Bury new siblings"),
+      field("Learning steps (minutes)", newSteps,
+        "Delays between repetitions while a card is being learned. \"1 10\" means: see it again after 1 minute, then after 10 minutes; passing the last step turns it into a review card."),
+      field("New cards/day", newPerDay,
+        "How many new cards may be introduced per day from this deck. Parent and subdeck limits stack — the smallest one along the chain wins."),
+      el("div", { class: "row" },
+        field("Graduating interval (days)", gradGood,
+          "Days until the first review after passing the final learning step with Good."),
+        field("Easy interval (days)", gradEasy,
+          "Days until the first review when you press Easy on a learning card — it skips the remaining steps and graduates immediately.")),
+      field("Starting ease", startEase,
+        "The starting interval multiplier for reviews (SM-2). At 2.5, pressing Good multiplies the interval by about 2.5×. Not used while FSRS is enabled."),
+      field("Insertion order", newOrder,
+        "Sequential shows newly added cards in the order you created them; Random shuffles them into the backlog."),
+      inline(newBury, "Bury new siblings",
+        "After studying one card of a note, its other NEW cards are hidden until tomorrow, so \"front→back\" and \"back→front\" of the same note don't appear the same day."),
       el("h3", {}, "Reviews"),
-      field("Maximum reviews/day", revPerDay),
-      el("label", { class: "inline" }, newIgnoreRev, "New cards ignore review limit"),
-      el("label", { class: "inline" }, autoplayChk, "Automatically play audio"),
-      field("Maximum interval (days)", maxIvl),
-      el("div", { class: "row" }, field("Easy bonus", easyBonus), field("Hard interval", hardFactor), field("Interval modifier", ivlMod)),
-      el("label", { class: "inline" }, revBury, "Bury review siblings"),
+      field("Maximum reviews/day", revPerDay,
+        "Cap on reviews shown per day. Learning cards that cross a day boundary count against it, and by default it also gates new-card introduction."),
+      inline(newIgnoreRev, "New cards ignore review limit",
+        "Keep introducing new cards even on days the review limit is already used up."),
+      inline(autoplayChk, "Automatically play audio",
+        "Play a card's first audio/video as soon as the card is shown."),
+      field("Maximum interval (days)", maxIvl,
+        "Reviews are never scheduled further out than this. 36500 (100 years) effectively means no limit."),
+      el("div", { class: "row" },
+        field("Easy bonus", easyBonus,
+          "Extra multiplier applied on top of the ease when you press Easy on a review. 1.3 = 30% longer than Good."),
+        field("Hard interval", hardFactor,
+          "Multiplier for Hard: the interval grows by this factor (1.2 = 20% longer) instead of the full ease."),
+        field("Interval modifier", ivlMod,
+          "A global dial on all SM-2 review intervals. 1.0 = unchanged, 0.9 = 10% shorter (more retention, more work).")),
+      inline(revBury, "Bury review siblings",
+        "After studying one card of a note, its other REVIEW cards are hidden until tomorrow."),
       el("h3", {}, "Lapses"),
-      field("Relearning steps (minutes)", lapseSteps),
-      field("Leech threshold (lapses)", leechFails),
-      field("Minimum interval (days)", minInt),
-      field("New interval (% of old)", newIvlPct),
-      field("Leech action", leechAction),
+      field("Relearning steps (minutes)", lapseSteps,
+        "The learning steps a review card goes through after you press Again on it."),
+      field("Leech threshold (lapses)", leechFails,
+        "After this many lapses (and every half-threshold after), the note is tagged \"leech\" and the leech action runs. Leeches eat your study time — usually the card needs rewriting."),
+      field("Minimum interval (days)", minInt,
+        "A lapsed card's next review interval never drops below this many days."),
+      field("New interval (% of old)", newIvlPct,
+        "After relearning, the new interval is this percentage of the old one. 0% starts the card's interval over from scratch."),
+      field("Leech action", leechAction,
+        "What happens when a card becomes a leech: Suspend hides it until you unsuspend; Tag only just marks the note so you can find and fix it."),
       el("h3", {}, "FSRS"),
-      el("label", { class: "inline" }, fsrsOn, "Enable FSRS (whole collection)"),
-      field("Desired retention (0.70–0.99)", retention),
-      field("Parameters (17/19/21 numbers, comma-separated; blank = default)", fsrsParams),
+      inline(fsrsOn, "Enable FSRS (whole collection)",
+        "Schedule reviews with the FSRS memory model instead of SM-2 multipliers. It predicts recall per card and picks intervals to hit your desired retention."),
+      field("Desired retention (0.70–0.99)", retention,
+        "The fraction of reviews you want to answer correctly. Higher means more frequent reviews: 0.90 is the default; 0.95 roughly doubles your workload."),
+      field("Parameters (17/19/21 numbers, comma-separated; blank = default)", fsrsParams,
+        "FSRS weights fitted to your review history (from Anki's optimizer). Leave blank to use the stock FSRS-6 defaults."),
       el("h3", {}, "Collection preferences"),
-      field("Next day starts at (hour, 0–23)", rolloverHour),
-      field("New/review order", newSpreadSel),
-      field("Learn ahead limit (minutes)", learnAhead),
+      field("Next day starts at (hour, 0–23)", rolloverHour,
+        "The hour when the scheduling day rolls over. At 4, studying at 2 AM still counts as yesterday — so late-night sessions don't split across two days."),
+      field("New/review order", newSpreadSel,
+        "When new cards appear relative to reviews in a session: mixed evenly through them, after all reviews are done, or before them."),
+      field("Learn ahead limit (minutes)", learnAhead,
+        "When nothing is due right now, learning cards due within this many minutes are shown early instead of making you wait."),
       el("p", { class: "muted" }, "Scheduling options apply to every deck sharing this options group; collection preferences apply everywhere."),
       el("div", { class: "row" }, el("button", { onclick: save }, "Save")),
     ),
