@@ -147,6 +147,17 @@ main h3 { margin: 18px 0 4px; font-size: 15px; color: var(--muted); }
 .rich:focus { box-shadow: inset 0 0 0 2px var(--accent); }
 .rich.dropping { box-shadow: inset 0 0 0 2px var(--accent); background: rgba(110, 168, 254, 0.08); }
 .rich img { max-width: 100%; }
+
+/* type-in-the-answer diff (Anki classes) */
+code#typeans { display: inline-block; padding: 6px 10px; border-radius: 6px; background: var(--panel-2); font-size: 1em; }
+.typeGood { background: #1e5c2e; color: #d6f5dd; }
+.typeBad { background: #6e1f1f; color: #ffd9d9; text-decoration: line-through; }
+.typeMissed { background: #555; color: #eee; }
+#typearrow { display: inline-block; }
+
+/* cloze */
+.card .cloze-inactive { color: inherit; }
+a.hint { display: inline-block; color: var(--accent); }
 .rich-raw { width: 100%; min-height: 80px; border: none; border-radius: 0; }
 .io-preview { font-size: 12px; margin-top: 8px; word-break: break-word; }
 

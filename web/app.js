@@ -500,7 +500,9 @@ function renderStudy() {
     return;
   }
   applyModelCss(noteType);
-  const { question } = renderCard(noteType, card.ord, note);
+  const { question } = renderCard(noteType, card.ord, note, {
+    deckName: deckName(card.did), flag: card.flags & 7,
+  });
 
   show(back, cardFace(question), showAnswerBtn, reviewMoreBar());
   autoplayFirstMedia();
@@ -534,7 +536,9 @@ function showAnswer() {
   }
   applyModelCss(noteType);
   const typed = view().querySelector("#typeans")?.value ?? "";
-  const { answer } = renderCard(noteType, card.ord, note, { typed });
+  const { answer } = renderCard(noteType, card.ord, note, {
+    typed, deckName: deckName(card.did), flag: card.flags & 7,
+  });
   show(crumbs, cardFace(answer), controls, reviewMoreBar());
   autoplayFirstMedia();
   typesetMath();
