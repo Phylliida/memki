@@ -79,6 +79,26 @@ function icon(name) {
   return el("span", { class: "ic", html: ICONS[name] ?? "" });
 }
 
+/**
+ * A centered modal on top of everything. Closes on backdrop click or Escape.
+ * @returns {{ close: () => void, panel: HTMLElement }}
+ */
+function openModal(children, { onClose } = {}) {
+  const overlay = el("div", { class: "modal-overlay" });
+  const panel = el("div", { class: "modal-panel" }, ...children);
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey);
+    onClose?.();
+  };
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  document.addEventListener("keydown", onKey);
+  overlay.append(panel);
+  document.body.append(overlay);
+  return { close, panel };
+}
+
 /** A valid model id: the preferred one if it exists, else the first model. */
 function validModelId(preferred) {
   if (preferred != null && state.col.models[String(preferred)]) return String(preferred);
@@ -1693,28 +1713,29 @@ function noteActions(note, onDone) {
   const decks = Object.values(state.col.decks).filter((d) => !d.dyn);
   const act = async (fn, meta) => { await applyToNoteCards(note, fn, { meta }); onDone(); };
 
-  // Deck membership popup: toggle which decks this note's cards live in.
-  const deckPop = el("div", { class: "pop-panel deck-pop" });
-  deckPop.style.display = "none";
-  const buildDeckPop = () => {
-    const inDecks = new Set(state.col.cardsForNote(note.id).map((c) => c.did));
-    deckPop.replaceChildren(
+  // Deck membership: a centered modal with a toggle per deck.
+  const openDeckModal = () => {
+    const bubbles = el("div", { class: "tag-bubbles" });
+    const rebuild = () => {
+      const inDecks = new Set(state.col.cardsForNote(note.id).map((c) => c.did));
+      bubbles.replaceChildren(...decks.map((d) =>
+        el("button", {
+          type: "button", class: `tag-bub${inDecks.has(d.id) ? " on" : ""}`,
+          onclick: async () => {
+            const ok = await toggleNoteDeck(note, d.id, !inDecks.has(d.id));
+            if (!ok) setStatus("A note must stay in at least one deck.");
+            rebuild();
+          },
+        }, d.name)));
+    };
+    rebuild();
+    const { close } = openModal([
       el("h3", {}, "Decks"),
       el("div", { class: "muted pop-src" },
         "This note lives in the toggled decks. On adds fresh cards there; off removes that deck's copies. Scheduling is per-deck."),
-      el("div", { class: "tag-bubbles" },
-        ...decks.map((d) =>
-          el("button", {
-            type: "button", class: `tag-bub${inDecks.has(d.id) ? " on" : ""}`,
-            onclick: async () => {
-              const ok = await toggleNoteDeck(note, d.id, !inDecks.has(d.id));
-              if (!ok) setStatus("A note must stay in at least one deck.");
-              buildDeckPop();
-            },
-          }, d.name))),
-      el("div", { class: "row" },
-        el("button", { type: "button", onclick: () => { deckPop.style.display = "none"; onDone(); } }, "Close")),
-    );
+      bubbles,
+      el("div", { class: "row" }, el("button", { type: "button", onclick: () => close() }, "Close")),
+    ], { onClose: onDone });
   };
 
   return el("div", { class: "note-actions" },
@@ -1723,13 +1744,7 @@ function noteActions(note, onDone) {
     el("button", { onclick: () => { if (confirm("Reset these cards to new?")) act((s, c) => s.forget(c), true); } }, "Forget"),
     el("button", { onclick: () => { const d = Number(prompt("Due in how many days?", "1")); if (Number.isFinite(d)) act((s, c) => s.setDueDate(c, d)); } }, "Set Due"),
     el("span", { class: "na-group" }, "Flag", flagPicker(cardFlagSet(cards[0] ?? { flags: 0 }), (n) => act((s, c) => s.toggleFlag(c, n)))),
-    el("span", { class: "na-group pop-anchor" },
-      el("button", { onclick: () => {
-        if (deckPop.style.display === "none") { buildDeckPop(); deckPop.style.display = ""; }
-        else { deckPop.style.display = "none"; onDone(); }
-      } }, "Decks"),
-      deckPop,
-    ),
+    el("button", { onclick: openDeckModal }, "Decks"),
   );
 }
 
