@@ -40,11 +40,16 @@ header h1 { font-size: 18px; margin: 0; font-weight: 600; letter-spacing: 0.5px;
 
 main {
   flex: 1;
-  padding: 24px 20px;
-  max-width: 760px;
+  padding: 24px 24px;
+  max-width: 1200px;
   width: 100%;
   margin: 0 auto;
 }
+/* Reading-width columns inside the wide page: cards and forms stay narrow
+   enough to read; lists, browse, and stats use the full width. */
+.card-face { max-width: 820px; margin-left: auto; margin-right: auto; }
+.study-controls, .more-bar { max-width: 820px; margin-left: auto; margin-right: auto; }
+.form { max-width: 900px; }
 
 button {
   background: var(--panel-2);

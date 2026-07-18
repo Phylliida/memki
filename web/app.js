@@ -525,7 +525,8 @@ function renderDecks() {
     const leaf = d.name.split("::").pop();
     const actions = d.dyn
       ? el("span", { class: "deck-actions" },
-          el("button", { class: "icon", title: "Empty (return cards home)", onclick: (e) => { e.stopPropagation(); emptyFilteredDeck(d); } }, "⏏"))
+          el("button", { class: "icon", title: "Rename", onclick: (e) => { e.stopPropagation(); renameDeckPrompt(d); } }, "✎"),
+          el("button", { class: "icon", title: "Empty (return cards home and remove deck)", onclick: (e) => { e.stopPropagation(); emptyFilteredDeck(d); } }, "⏏"))
       : el("span", { class: "deck-actions" },
           el("button", { class: "icon", title: "Custom study", onclick: (e) => { e.stopPropagation(); renderCustomStudy(d.id); } }, "⚡"),
           el("button", { class: "icon", title: "Options", onclick: (e) => { e.stopPropagation(); renderDeckOptions(d.id); } }, "⚙"),
@@ -909,13 +910,24 @@ function quoteTerm(term) {
   return /\s/.test(term) ? `"${term}"` : term;
 }
 
-/** Build a filtered deck from a browse query and start studying it. */
-async function buildDeckFromSearch(query) {
+/**
+ * Create a named, persistent filtered deck from a browse query. Membership is
+ * the set of cards matching *right now* — later tag/field changes don't alter
+ * it. The deck lives in the deck list until you empty it (⏏), which returns
+ * its cards home.
+ */
+async function createFilteredDeckFromSearch(query) {
   let pred;
   try { pred = compileSearch(query); } catch { setStatus("Invalid search."); return; }
+  const name = prompt("Filtered deck name:");
+  if (!name || !name.trim()) return;
+  if (Object.values(state.col.decks).some((d) => d.name === name.trim())) {
+    setStatus(`A deck named "${name.trim()}" already exists.`);
+    return;
+  }
   const ctx = searchContext(state.col);
   const sched = new Scheduler(state.col, { fuzz: true });
-  const fd = state.col.createFilteredDeck("Custom Study");
+  const fd = state.col.createFilteredDeck(name.trim());
   const count = sched.buildFiltered(fd.id, (c) => pred(c, ctx));
   if (!count) {
     delete state.col.decks[String(fd.id)];
@@ -923,8 +935,8 @@ async function buildDeckFromSearch(query) {
     return;
   }
   await persistAll();
-  setStatus(`Custom deck: ${count} cards gathered.`);
-  startStudy(fd.id);
+  setStatus(`Created "${name.trim()}" — ${count} cards.`);
+  renderDecks();
 }
 
 function renderBrowse(query = "") {
@@ -1055,8 +1067,8 @@ function renderBrowse(query = "") {
       el("h2", {}, "Browse"),
       el("div", { class: "row" },
         el("button", { class: "side-toggle", onclick: () => sidebar.classList.toggle("open") }, "☰ Filters"),
-        el("button", { title: "Build a filtered deck from the current filters + search and study it",
-          onclick: () => buildDeckFromSearch(effectiveQuery()) }, "⚡ Study these"),
+        el("button", { title: "Create a persistent deck holding the cards that match the current filters + search",
+          onclick: () => createFilteredDeckFromSearch(effectiveQuery()) }, "⚡ Create Filtered Deck"),
       ),
     ),
     search,
