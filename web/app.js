@@ -265,9 +265,15 @@ function richEditor(initialHtml = "") {
   // editing. Volume changes on these persist like everywhere else.
   const soundStrip = el("div", { class: "sound-strip" });
   soundStrip.style.display = "none";
+  let stripNames = "";
   const updateSoundStrip = () => {
     const html = rawMode ? raw.value : storageHtml();
     const names = [...new Set([...html.matchAll(/\[sound:([^\]]+)\]/g)].map((m) => m[1].trim()))];
+    // Rebuild only when the sound set actually changed — a rebuild replaces
+    // the players, resetting playback and any in-progress volume drag.
+    const key = names.join("\x1f");
+    if (key === stripNames) return;
+    stripNames = key;
     if (!names.length) {
       soundStrip.replaceChildren();
       soundStrip.style.display = "none";
@@ -302,7 +308,9 @@ function richEditor(initialHtml = "") {
     tbBtn("</>", "Edit HTML", toggleRaw),
   );
   const wrap = el("div", { class: "rich-wrap" }, toolbar, area, raw, soundStrip);
-  wrap.addEventListener("input", scheduleSoundStrip); // area and raw both bubble here
+  // area and raw both bubble here; media controls' composed input events
+  // (volume slider drags) must not count as content edits.
+  wrap.addEventListener("input", (e) => { if (!isMediaEvent(e)) scheduleSoundStrip(); });
   updateSoundStrip();
 
   // --- image sizing (Anki-style): click an image to select it, drag the
@@ -441,6 +449,11 @@ function scheduleVolumeSave(name, v) {
     (state.col.conf.soundVolumes ??= {})[name] = Math.round(v * 100) / 100;
     await putMeta(state.db, state.col);
   }, 300));
+}
+
+/** Did this event originate inside a media player (e.g. its volume slider)? */
+function isMediaEvent(e) {
+  return !!(e.target && (e.target.closest?.("audio, video, .sound-strip")));
 }
 
 /** Apply saved volumes to the players under `root` and persist adjustments. */
@@ -1543,7 +1556,7 @@ function noteEditorForm(noteId, cb = {}) {
   const cardCount = state.col.cardsForNote(noteId).length;
   const fieldsBox = el("div", { class: "form ne-fields" },
     ...inputs.map(({ f, ed }) => el("label", {}, f.name, ed.el)));
-  fieldsBox.addEventListener("input", scheduleSave);
+  fieldsBox.addEventListener("input", (e) => { if (!isMediaEvent(e)) scheduleSave(); });
   fieldsBox.addEventListener("focusout", () => {
     if (saveTimer) { clearTimeout(saveTimer); doSave(); }
   });
