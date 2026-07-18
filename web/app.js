@@ -1112,6 +1112,11 @@ function renderBrowse() {
   const tabsBar = el("div", { class: "filter-tabs" });
   const renderTabs = () => {
     tabsBar.replaceChildren(
+      el("button", {
+        class: `ftab all${state.browseViewAll ? " active" : ""}`,
+        title: "Show the union of all filters (a card matching any filter)",
+        onclick: () => { state.browseViewAll = true; sync(); },
+      }, "All filters"),
       ...tabs.map((t, i) =>
         el("button", {
           class: `ftab${!state.browseViewAll && i === state.browseActive ? " active" : ""}`,
@@ -1134,11 +1139,6 @@ function renderBrowse() {
         state.browseViewAll = false;
         sync();
       } }, "New filter"),
-      el("button", {
-        class: `ftab all${state.browseViewAll ? " active" : ""}`,
-        title: "Show the union of all filters (a card matching any filter)",
-        onclick: () => { state.browseViewAll = true; sync(); },
-      }, "All filters"),
     );
   };
 
