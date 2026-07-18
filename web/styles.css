@@ -239,3 +239,69 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 .br-state.learning, .br-state.relearning { color: var(--hard); }
 .br-state.review { color: var(--good); }
 .br-state.suspended { color: var(--again); }
+
+/* Live previews (Add Card, template editor) */
+.preview-box { margin-top: 4px; }
+.pv-count { font-size: 12px; margin: 8px 0 4px; }
+.pv-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pv-pair .card-face { min-height: 0; padding: 12px; font-size: 15px; }
+.pv-pair .card-face .card { padding: 12px; }
+
+/* Live consequences line in deck options */
+.consequences {
+  font-size: 13px; line-height: 1.6;
+  background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: 8px; padding: 10px 12px;
+}
+
+/* --- touch & mobile --- */
+
+/* Touch devices have no hover: keep per-deck actions visible. */
+@media (hover: none) {
+  .deck-actions { opacity: 1; }
+}
+
+@media (max-width: 640px) {
+  header { padding: 8px 10px; gap: 8px; }
+  header h1 { font-size: 15px; }
+  .actions { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .actions::-webkit-scrollbar { display: none; }
+  .actions button { padding: 8px 10px; font-size: 13px; white-space: nowrap; }
+
+  main { padding: 14px 12px; }
+  /* Leave room for the fixed answer bar when one is on screen. */
+  main:has(.study-controls), main:has(.show-answer) {
+    padding-bottom: calc(140px + env(safe-area-inset-bottom));
+  }
+
+  .card-face { padding: 16px; font-size: 18px; }
+  .card-face .card { padding: 14px; }
+
+  /* Answer controls live at the bottom, in thumb reach, always visible. */
+  .study-controls {
+    position: fixed; left: 0; right: 0; bottom: 0; margin: 0;
+    padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
+    background: var(--panel); border-top: 1px solid var(--border); z-index: 20;
+  }
+  .rate { max-width: none; min-height: 58px; }
+  .show-answer {
+    position: fixed; left: 0; right: 0; bottom: 0; margin: 0; width: 100%; max-width: none;
+    padding: 18px 10px calc(18px + env(safe-area-inset-bottom));
+    border-radius: 0; border: none; border-top: 1px solid var(--border);
+    background: var(--panel); font-size: 17px; z-index: 20;
+  }
+
+  .form .row { flex-direction: column; }
+  /* 16px inputs stop iOS from zooming the page on focus. */
+  .form input, .form textarea, .form select, .search { font-size: 16px; }
+
+  .pv-pair { grid-template-columns: 1fr; }
+  .stat-grid { grid-template-columns: repeat(2, 1fr); }
+
+  .deck { padding: 12px 10px; gap: 8px; }
+  .deck .name { font-size: 15px; }
+  .count { min-width: 22px; }
+  button.icon { padding: 8px; }        /* bigger touch targets */
+  .br-deck { display: none; }          /* tighter browse rows */
+  .note-actions .na-group { width: 100%; }
+}

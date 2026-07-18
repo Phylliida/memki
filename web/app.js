@@ -53,6 +53,11 @@ function show(...nodes) {
   v.replaceChildren(...nodes);
 }
 
+function debounced(fn, ms = 180) {
+  let t;
+  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
 /** A valid model id: the preferred one if it exists, else the first model. */
 function validModelId(preferred) {
   if (preferred != null && state.col.models[String(preferred)]) return String(preferred);
@@ -546,7 +551,9 @@ function renderDecks() {
     const c = sched.counts(d.id);
     return n + c.new + c.learning + c.review;
   }, 0);
-  setStatus(`${state.col.cards.size} cards · ${total} due`);
+  const studied = decks.reduce(
+    (n, d) => n + sched._counterValue(d, "newToday") + sched._counterValue(d, "revToday"), 0);
+  setStatus(`${state.col.cards.size} cards · ${total} due · ${studied} studied today`);
 }
 
 function nextDueCard() {
@@ -727,8 +734,39 @@ function renderAddCard() {
       return el("label", {}, f.name, ed.el);
     }));
   };
-  modelSel.addEventListener("change", rebuildFields);
+
+  // Live preview: the actual card(s) this note will create, as you type.
+  const previewBox = el("div", { class: "preview-box" });
+  const updatePreview = () => {
+    const model = state.col.noteType(Number(modelSel.value)) ?? models[0];
+    if (!model) { previewBox.replaceChildren(); return; }
+    const fields = inputs.map((ed) => ed.getHTML());
+    const tmpNote = new Note({ mid: model.id, fields });
+    const ords = cardOrdinalsForNote(model, tmpNote);
+    if (!ords.length) {
+      previewBox.replaceChildren(el("div", { class: "muted pv-count" }, "No cards yet — fill the first field."));
+      return;
+    }
+    applyModelCss(model);
+    const { question, answer } = renderCard(model, ords[0], tmpNote, {
+      deckName: decks.find((d) => String(d.id) === deckSel.value)?.name ?? "",
+    });
+    previewBox.replaceChildren(
+      el("div", { class: "muted pv-count" },
+        `Will create ${ords.length} card${ords.length > 1 ? "s" : ""} · previewing "${model.tmpls[model.type === NoteTypeKind.Cloze ? 0 : ords[0]]?.name ?? ""}"`),
+      el("div", { class: "pv-pair" },
+        el("div", { class: "card-face pv" }, el("div", { class: "card", html: displayHtml(question) })),
+        el("div", { class: "card-face pv" }, el("div", { class: "card", html: displayHtml(answer) })),
+      ),
+    );
+    typesetMath();
+  };
+  const schedulePreview = debounced(updatePreview);
+  fieldsWrap.addEventListener("input", schedulePreview);
+  deckSel.addEventListener("change", schedulePreview);
+  modelSel.addEventListener("change", () => { rebuildFields(); schedulePreview(); });
   rebuildFields();
+  updatePreview();
 
   const save = async () => {
     const model = state.col.noteType(Number(modelSel.value)) ?? models[0];
@@ -747,14 +785,14 @@ function renderAddCard() {
     el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
     el("h2", {}, "Add Card"),
     el("div", { class: "form" },
-      el("label", {}, "Note type", modelSel),
-      el("label", {}, "Deck", deckSel),
+      el("div", { class: "row" }, el("label", {}, "Note type", modelSel), el("label", {}, "Deck", deckSel)),
       fieldsWrap,
       el("div", { class: "row" },
         el("button", { onclick: save }, "Save"),
         el("button", { onclick: renderImportCsv }, "Import CSV/TSV"),
         el("button", { onclick: renderImageOcclusion }, "🖼 Image Occlusion"),
       ),
+      previewBox,
     ),
   );
 }
@@ -1020,6 +1058,31 @@ function renderDeckOptions(deckId) {
   newSpreadSel.value = String(state.col.conf.newSpread ?? 0);
   const learnAhead = num(Math.round((state.col.conf.collapseTime ?? 1200) / 60));
 
+  // What these settings actually do, shown live (no imagining required).
+  const consequences = el("div", { class: "consequences muted" });
+  const updateConsequences = () => {
+    const fmtM = (mins) => (mins < 60 ? `${Math.round(mins)}m` : mins < 1440 ? `${(mins / 60).toFixed(mins % 60 ? 1 : 0)}h` : `${Math.round(mins / 1440)}d`);
+    const steps = parseSteps(newSteps.value);
+    const ease = Number(startEase.value) || 2.5;
+    const mod = Number(ivlMod.value) || 1;
+    const ivl = 10; // a sample 10-day review card
+    const hard = Math.max(1, Math.round(ivl * (Number(hardFactor.value) || 1.2) * mod));
+    const good = Math.max(hard + 1, Math.round(ivl * ease * mod));
+    const easy = Math.max(good + 1, Math.round(ivl * ease * (Number(easyBonus.value) || 1.3) * mod));
+    const relearn = parseSteps(lapseSteps.value);
+    const lapseIvl = Math.max(Number(minInt.value) || 1, Math.round(ivl * ((Number(newIvlPct.value) || 0) / 100)));
+    consequences.replaceChildren(
+      el("div", {}, `New card: ${steps.length ? steps.map(fmtM).join(" → ") : "no steps"} → graduates at ${Number(gradGood.value) || 1}d (Easy: ${Number(gradEasy.value) || 4}d).`),
+      el("div", {}, `A 10-day review: Hard ${hard}d · Good ${good}d · Easy ${easy}d · Again → ${relearn.length ? relearn.map(fmtM).join(" → ") + " then" : ""} ${lapseIvl}d.`),
+      state.col.conf.fsrs ? el("div", {}, "FSRS is on: review intervals above are replaced by the memory model; steps and limits still apply.") : "",
+    );
+  };
+  const scheduleConsequences = debounced(updateConsequences, 120);
+  for (const inp of [newSteps, gradGood, gradEasy, startEase, hardFactor, easyBonus, ivlMod, lapseSteps, newIvlPct, minInt]) {
+    inp.addEventListener("input", scheduleConsequences);
+  }
+  updateConsequences();
+
   const save = async () => {
     nu.delays = parseSteps(newSteps.value);
     nu.perDay = Number(newPerDay.value) || 0;
@@ -1059,6 +1122,7 @@ function renderDeckOptions(deckId) {
     el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
     el("h2", {}, `Options — ${deck.name}`),
     el("div", { class: "form" },
+      consequences,
       el("h3", {}, "New cards"),
       field("Learning steps (minutes)", newSteps),
       field("New cards/day", newPerDay),
@@ -1393,6 +1457,40 @@ function renderEditNoteType(mid) {
     renderNoteTypes();
   };
 
+  // Live preview: render a real note of this type (or field-name placeholders)
+  // through the templates as they are edited — including the CSS box.
+  const previewBox = el("div", { class: "preview-box" });
+  const updatePreview = () => {
+    const tmpNt = {
+      ...nt,
+      css: cssArea.value,
+      tmpls: tmplInputs.map(({ ord, name, qfmt, afmt }) =>
+        ({ ...nt.tmpls[ord], name: name.value, qfmt: qfmt.value, afmt: afmt.value })),
+    };
+    const sample = state.col.notesOfType(mid)[0]
+      ?? new Note({ mid, fields: nt.flds.map((f) => f.name === "Text" && isCloze ? "A {{c1::sample}} cloze" : `(${f.name})`) });
+    applyModelCss(tmpNt);
+    const parts = [el("h3", {}, "Live preview")];
+    for (const t of (isCloze ? [tmpNt.tmpls[0]] : tmpNt.tmpls)) {
+      if (!t) continue;
+      try {
+        const { question, answer } = renderCard(tmpNt, isCloze ? 0 : t.ord, sample, { deckName: "Deck" });
+        parts.push(
+          el("div", { class: "muted pv-count" }, t.name),
+          el("div", { class: "pv-pair" },
+            el("div", { class: "card-face pv" }, el("div", { class: "card", html: displayHtml(question) })),
+            el("div", { class: "card-face pv" }, el("div", { class: "card", html: displayHtml(answer) })),
+          ),
+        );
+      } catch { /* a template can be transiently invalid mid-edit */ }
+    }
+    previewBox.replaceChildren(...parts);
+    typesetMath();
+  };
+  const schedulePreview = debounced(updatePreview);
+  tmplBox.addEventListener("input", schedulePreview);
+  cssArea.addEventListener("input", schedulePreview);
+
   show(
     el("div", { class: "crumbs", onclick: renderNoteTypes }, "← Note types"),
     el("h2", {}, `Edit note type${isCloze ? " (Cloze)" : ""}`),
@@ -1412,8 +1510,10 @@ function renderEditNoteType(mid) {
       } }, "+ Template"),
       el("h3", {}, "Styling (CSS)"), cssArea,
       el("div", { class: "row" }, el("button", { onclick: save }, "Save")),
+      previewBox,
     ),
   );
+  updatePreview();
 }
 
 // --- stats ---
