@@ -1206,9 +1206,11 @@ function renderBrowse() {
     };
     nameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") create(); });
     createPanel.replaceChildren(
-      el("h3", {}, "Create Filtered Deck"),
+      el("h3", {}, state.browseViewAll
+        ? "Create Filtered Deck — from All filters"
+        : `Create Filtered Deck — from Filter ${state.browseActive + 1}`),
       el("div", { class: "muted pop-src" },
-        state.browseViewAll ? "Union of all filters — a card in any of:" : "Cards matching the selected filter:"),
+        state.browseViewAll ? "The union (OR) of all filters — a card in any of:" : "Cards matching the selected filter:"),
       ...sources.map((s) => el("div", { class: "pop-filter" },
         el("b", {}, s.label), " ", el("code", {}, s.q || "(empty — matches every card)"))),
       el("div", { class: "muted" },

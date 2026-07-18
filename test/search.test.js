@@ -202,3 +202,15 @@ test("flag search matches any of a card's multiple flags", () => {
   assert.equal(searchCards(col, "flag:blue").length, 0);
   assert.equal(searchCards(col, "flag:none").length, 1);
 });
+
+test("All-filters union query gathers cards from every filter (OR)", () => {
+  const { col, mk } = build2();
+  const a = mk(["bee", "x"]); writeCardFlags(a, new Set([1]));
+  mk(["wasp", "x"]);                       // matches filter 2 only
+  mk(["moth", "x"]);                       // matches neither
+  // exactly what the browse view composes for two non-empty filters:
+  const union = "(front:bee flag:red) or (front:wasp)";
+  assert.equal(searchCards(col, union).length, 2);
+  // and with an empty filter present, the union is every card:
+  assert.equal(searchCards(col, "").length, 3);
+});
