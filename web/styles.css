@@ -255,6 +255,18 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 .side-item:hover { background: var(--panel-2); }
 .side-indent { display: inline-block; flex: none; }
 .side-toggle { display: none; }
+.side-clear { font-size: 12px; }
+
+/* Toggled-on chips get colored in; flags use their own color. */
+.side-item.on { background: var(--accent); color: #10131a; font-weight: 600; }
+.side-item.on .flag-dot { color: #10131a; }
+.side-item.f1.on { background: #ff6b6b; }
+.side-item.f2.on { background: #ffa94d; }
+.side-item.f3.on { background: #8ce99a; }
+.side-item.f4.on { background: #74c0fc; }
+.side-item.f5.on { background: #f783ac; }
+.side-item.f6.on { background: #3bc9db; }
+.side-item.f7.on { background: #b197fc; }
 
 /* Live previews (Add Card, template editor) */
 .preview-box { margin-top: 4px; }

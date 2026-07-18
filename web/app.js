@@ -929,22 +929,45 @@ async function buildDeckFromSearch(query) {
 
 function renderBrowse(query = "") {
   state.card = null;
+  // Toggleable sidebar filters: OR within a section, AND across sections,
+  // free text from the search box AND'd on top. Persists across screens.
+  state.browseFilters ??= {
+    today: new Set(), cardState: new Set(), flags: new Set(),
+    decks: new Set(), notes: new Set(), tags: new Set(),
+  };
+  const filters = state.browseFilters;
+
   const search = el("input", {
     class: "search", type: "search", value: query,
     placeholder: 'Search — e.g. deck:Spanish tag:verb is:due prop:ivl>21 -flag:red',
-    oninput: (e) => { state.browseQuery = e.target.value; renderRows(e.target.value); },
+    oninput: (e) => { state.browseQuery = e.target.value; renderRows(effectiveQuery()); },
   });
   const list = el("div", { class: "browse-list" });
 
-  // --- sidebar: click sets the search; Ctrl/⌘-click ANDs it on ---
-  const setQuery = (q, additive) => {
-    const next = additive && search.value.trim() ? `${search.value.trim()} ${q}` : q;
-    search.value = next;
-    state.browseQuery = next;
-    renderRows(next);
+  const effectiveQuery = () => {
+    const parts = [];
+    for (const set of Object.values(filters)) {
+      if (!set.size) continue;
+      const terms = [...set];
+      parts.push(terms.length > 1 ? `(${terms.join(" or ")})` : terms[0]);
+    }
+    const text = search.value.trim();
+    if (text) parts.push(text);
+    return parts.join(" ");
   };
-  const sideItem = (label, q, extra = null) =>
-    el("div", { class: "side-item", title: q, onclick: (e) => setQuery(q, e.ctrlKey || e.metaKey) }, extra, label);
+
+  const sideItem = (sectionKey, label, term, extra = null, cls = "") => {
+    const set = filters[sectionKey];
+    const item = el("div", {
+      class: `side-item ${cls}${set.has(term) ? " on" : ""}`, title: term,
+      onclick: () => {
+        if (set.has(term)) { set.delete(term); item.classList.remove("on"); }
+        else { set.add(term); item.classList.add("on"); }
+        renderRows(effectiveQuery());
+      },
+    }, extra, label);
+    return item;
+  };
   const section = (title, ...items) =>
     el("div", { class: "side-sec" }, el("h4", {}, title), ...items);
 
@@ -954,41 +977,46 @@ function renderBrowse(query = "") {
   const tags = [...tagSet].sort((a, b) => a.localeCompare(b));
 
   const sidebar = el("aside", { class: "browse-side" },
+    el("div", { class: "side-item side-clear muted", onclick: () => {
+      Object.values(filters).forEach((s) => s.clear());
+      sidebar.querySelectorAll(".side-item.on").forEach((n) => n.classList.remove("on"));
+      renderRows(effectiveQuery());
+    } }, "✕ Clear filters"),
     section("Today",
-      sideItem("Due today", "is:due"),
-      sideItem("Overdue", "is:due prop:due<0"),
-      sideItem("Added", "added:1"),
-      sideItem("Edited", "edited:1"),
-      sideItem("Studied", "rated:1"),
-      sideItem("First review", "introduced:1"),
-      sideItem("Rescheduled", "rated:1:0"),
-      sideItem("Again", "rated:1:1"),
+      sideItem("today", "Due today", "is:due"),
+      sideItem("today", "Overdue", "is:due prop:due<0"),
+      sideItem("today", "Added", "added:1"),
+      sideItem("today", "Edited", "edited:1"),
+      sideItem("today", "Studied", "rated:1"),
+      sideItem("today", "First review", "introduced:1"),
+      sideItem("today", "Rescheduled", "rated:1:0"),
+      sideItem("today", "Again", "rated:1:1"),
     ),
     section("Card state",
-      sideItem("New", "is:new"),
-      sideItem("Learning", "is:learn"),
-      sideItem("Review", "is:review"),
-      sideItem("Suspended", "is:suspended"),
-      sideItem("Buried", "is:buried"),
+      sideItem("cardState", "New", "is:new"),
+      sideItem("cardState", "Learning", "is:learn"),
+      sideItem("cardState", "Review", "is:review"),
+      sideItem("cardState", "Suspended", "is:suspended"),
+      sideItem("cardState", "Buried", "is:buried"),
     ),
     section("Flags",
       ...FLAG_NAMES.map((name, i) =>
-        sideItem(name, `flag:${i ? name.toLowerCase() : "none"}`,
-          i ? el("span", { class: `flag-dot f${i}` }, "⚑") : null)),
+        sideItem("flags", name, `flag:${i ? name.toLowerCase() : "none"}`,
+          i ? el("span", { class: `flag-dot f${i}` }, "⚑") : null, `f${i} `)),
     ),
     section("Decks",
       ...decks.map((d) => {
         const depth = d.name.split("::").length - 1;
-        return sideItem(d.name.split("::").pop(), quoteTerm(`deck:${d.name}`),
+        return sideItem("decks", d.name.split("::").pop(), quoteTerm(`deck:${d.name}`),
           depth ? el("span", { class: "side-indent", style: `width:${depth * 12}px` }) : null);
       }),
     ),
     section("Note types",
-      ...Object.values(state.col.models).map((m) => sideItem(m.name, quoteTerm(`note:${m.name}`))),
+      ...Object.values(state.col.models).map((m) => sideItem("notes", m.name, quoteTerm(`note:${m.name}`))),
     ),
     section("Tags",
-      sideItem("Untagged", "tag:none"),
-      ...tags.map((t) => sideItem(t, quoteTerm(`tag:${t}`))),
+      sideItem("tags", "Untagged", "tag:none"),
+      ...tags.map((t) => sideItem("tags", t, quoteTerm(`tag:${t}`))),
     ),
   );
 
@@ -1017,7 +1045,8 @@ function renderBrowse(query = "") {
       all.length > shown.length ? el("div", { class: "center" }, `…and ${all.length - shown.length} more (refine search)`) : "",
       all.length ? "" : el("div", { class: "center" }, "No matching cards."),
     );
-    setStatus(`${all.length} card${all.length === 1 ? "" : "s"}`);
+    const nf = Object.values(filters).reduce((n, s) => n + s.size, 0);
+    setStatus(`${all.length} card${all.length === 1 ? "" : "s"}${nf ? ` · ${nf} filter${nf > 1 ? "s" : ""} on` : ""}`);
   };
 
   show(
@@ -1026,14 +1055,14 @@ function renderBrowse(query = "") {
       el("h2", {}, "Browse"),
       el("div", { class: "row" },
         el("button", { class: "side-toggle", onclick: () => sidebar.classList.toggle("open") }, "☰ Filters"),
-        el("button", { title: "Build a filtered deck from the current search and study it",
-          onclick: () => buildDeckFromSearch(search.value) }, "⚡ Study these"),
+        el("button", { title: "Build a filtered deck from the current filters + search and study it",
+          onclick: () => buildDeckFromSearch(effectiveQuery()) }, "⚡ Study these"),
       ),
     ),
     search,
     el("div", { class: "browse-layout" }, sidebar, list),
   );
-  renderRows(query);
+  renderRows(effectiveQuery());
 }
 
 function renderEditNote(noteId) {
