@@ -140,6 +140,10 @@ function richEditor(initialHtml = "") {
       img.setAttribute("src", safeDecode(img.getAttribute("data-name")));
       img.removeAttribute("data-name");
     }
+    for (const img of clone.querySelectorAll("img.img-selected")) {
+      img.classList.remove("img-selected"); // editor-only selection marker
+      if (!img.className) img.removeAttribute("class");
+    }
     return clone.innerHTML;
   };
 
@@ -177,6 +181,7 @@ function richEditor(initialHtml = "") {
   };
   const toggleRaw = () => {
     rawMode = !rawMode;
+    hideHandle();
     if (rawMode) { raw.value = storageHtml(); raw.style.display = ""; area.style.display = "none"; }
     else { area.innerHTML = editorDisplayHtml(raw.value); raw.style.display = "none"; area.style.display = ""; }
   };
@@ -223,10 +228,75 @@ function richEditor(initialHtml = "") {
     }),
     tbBtn("</>", "Edit HTML", toggleRaw),
   );
+  const wrap = el("div", { class: "rich-wrap" }, toolbar, area, raw);
+
+  // --- image sizing (Anki-style): click an image to select it, drag the
+  // corner handle to resize (stored as a width attribute, so it persists in
+  // the note and in exports), double-click to restore natural size. ---
+  const handle = el("span", { class: "img-handle", title: "Drag to resize · double-click image to reset" });
+  handle.style.display = "none";
+  wrap.append(handle);
+  let sizingImg = null;
+
+  const hideHandle = () => {
+    sizingImg?.classList.remove("img-selected");
+    sizingImg = null;
+    handle.style.display = "none";
+  };
+  const positionHandle = () => {
+    if (!sizingImg || !sizingImg.isConnected || rawMode) { hideHandle(); return; }
+    const wrapR = wrap.getBoundingClientRect();
+    const r = sizingImg.getBoundingClientRect();
+    handle.style.left = `${r.right - wrapR.left - 8}px`;
+    handle.style.top = `${r.bottom - wrapR.top - 8}px`;
+    handle.style.display = "";
+  };
+
+  area.addEventListener("click", (e) => {
+    if (e.target.tagName === "IMG") {
+      if (sizingImg !== e.target) {
+        sizingImg?.classList.remove("img-selected");
+        sizingImg = e.target;
+        sizingImg.classList.add("img-selected");
+      }
+      positionHandle();
+    } else {
+      hideHandle();
+    }
+  });
+  area.addEventListener("dblclick", (e) => {
+    if (e.target.tagName === "IMG") {
+      e.target.removeAttribute("width");
+      e.target.removeAttribute("height");
+      positionHandle();
+    }
+  });
+  area.addEventListener("input", () => { if (sizingImg) positionHandle(); });
+  handle.addEventListener("pointerdown", (e) => {
+    if (!sizingImg) return;
+    e.preventDefault();
+    const img = sizingImg;
+    const startX = e.clientX;
+    const startW = img.getBoundingClientRect().width;
+    const maxW = Math.max(48, area.clientWidth - 24);
+    const move = (ev) => {
+      const w = Math.min(Math.max(Math.round(startW + (ev.clientX - startX)), 16), maxW);
+      img.setAttribute("width", String(w));
+      img.removeAttribute("height"); // keep aspect ratio
+      positionHandle();
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  });
+
   return {
-    el: el("div", { class: "rich-wrap" }, toolbar, area, raw),
+    el: wrap,
     getHTML: () => (rawMode ? raw.value : storageHtml()),
-    setHTML: (h) => { area.innerHTML = editorDisplayHtml(h); raw.value = h; },
+    setHTML: (h) => { hideHandle(); area.innerHTML = editorDisplayHtml(h); raw.value = h; },
     focus: () => area.focus(),
   };
 }

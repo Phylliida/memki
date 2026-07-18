@@ -139,14 +139,20 @@ hr#answer { border: none; border-top: 1px solid #ccc; margin: 20px 0; }
 main h3 { margin: 18px 0 4px; font-size: 15px; color: var(--muted); }
 
 /* Rich-text field editor */
-.rich-wrap { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel-2); }
+.rich-wrap { position: relative; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel-2); }
 .rich-toolbar { display: flex; flex-wrap: wrap; gap: 2px; padding: 4px; background: var(--panel); border-bottom: 1px solid var(--border); }
 .rich-tb { padding: 2px 8px; min-width: 28px; font-size: 13px; background: transparent; border-color: transparent; }
 .rich-tb:hover { border-color: var(--border); }
 .rich { min-height: 64px; padding: 10px; outline: none; font-size: 15px; }
 .rich:focus { box-shadow: inset 0 0 0 2px var(--accent); }
 .rich.dropping { box-shadow: inset 0 0 0 2px var(--accent); background: rgba(110, 168, 254, 0.08); }
-.rich img { max-width: 100%; }
+.rich img { max-width: 100%; height: auto; }
+.rich img.img-selected { outline: 2px dashed var(--accent); outline-offset: 1px; }
+.img-handle { position: absolute; width: 15px; height: 15px; background: var(--accent); border: 2px solid var(--panel-2); border-radius: 4px; cursor: nwse-resize; z-index: 5; touch-action: none; }
+
+/* Cards never overflow on big images (Anki's default shrink behavior). */
+.card img { max-width: 100%; height: auto; }
+.io-back img { max-width: 100%; }
 
 /* type-in-the-answer diff (Anki classes) */
 code#typeans { display: inline-block; padding: 6px 10px; border-radius: 6px; background: var(--panel-2); font-size: 1em; }
