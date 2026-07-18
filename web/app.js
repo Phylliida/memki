@@ -12,7 +12,7 @@ import { collectionStats } from "../src/stats.js";
 import { compileSearch, searchContext } from "../src/search.js";
 import { parseCsv } from "../src/csv.js";
 import { Rating } from "../src/fsrs.js";
-import { stripHtml } from "../src/text.js";
+import { stripHtml, stripHtmlPreservingMediaFilenames } from "../src/text.js";
 import {
   openCollectionDB, loadCollection, saveCollection,
   putCard, putNote, putRevlog, putMeta, saveMedia, loadMedia, clearAll, deleteNoteAndCards, deleteRevlog,
@@ -772,7 +772,9 @@ function renderAddCard() {
     const model = state.col.noteType(Number(modelSel.value)) ?? models[0];
     if (!model) { setStatus("No note type available."); return; }
     const fields = inputs.map((ed) => ed.getHTML());
-    if (!stripHtml(fields[0]).trim()) { setStatus("The first field is empty."); return; }
+    // Emptiness check Anki-style: media filenames count as content, so an
+    // image-only (or [sound:]-only) first field is a valid note.
+    if (!stripHtmlPreservingMediaFilenames(fields[0]).trim()) { setStatus("The first field is empty."); return; }
     const note = addNoteWithCards(model, fields, Number(deckSel.value));
     await putNoteAndMeta(note);
     for (const c of state.col.cardsForNote(note.id)) await putCard(state.db, c);
@@ -864,7 +866,7 @@ function renderImportCsv() {
     let n = 0;
     for (const row of dataRows) {
       const fields = model.flds.map((_, fi) => (map[fi] >= 0 ? row[map[fi]] ?? "" : ""));
-      if (!stripHtml(fields[0]).trim()) continue;
+      if (!stripHtmlPreservingMediaFilenames(fields[0]).trim()) continue;
       addNoteWithCards(model, fields, did);
       n++;
     }
