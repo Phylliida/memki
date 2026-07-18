@@ -82,3 +82,91 @@ test("empty query matches everything; parens group OR under AND", () => {
   // (french or spanish) and greeting → Hola, Bonjour
   assert.deepEqual(titles(searchCards(col, "(french or spanish) greeting"), col), ["Bonjour", "Hola"]);
 });
+
+// --- extended syntax (audit additions) ---
+
+import { Revlog } from "../src/model.js";
+
+function build2() {
+  const col = Collection.createDefault();
+  col.crt = nowSec() - 100 * 86400;
+  const basic = Object.values(col.models).find((m) => m.name === "Basic").id;
+  const mk = (fields = ["Q", "A"], cardProps = {}) => {
+    const n = new Note({ mid: basic, fields }).normalize();
+    col.addNote(n);
+    return col.addCard(new Card({ nid: n.id, did: 1, ...cardProps }));
+  };
+  return { col, mk };
+}
+
+test("field search: Front:pattern matches the whole field with wildcards", () => {
+  const { col, mk } = build2();
+  mk(["dog", "chien"]);
+  mk(["dogma", "x"]);
+  assert.equal(searchCards(col, "front:dog").length, 1);
+  assert.equal(searchCards(col, "front:dog*").length, 2);
+  assert.equal(searchCards(col, "front:d_g").length, 1);
+  assert.equal(searchCards(col, "nosuchfield:dog").length, 0);
+});
+
+test("re: regex search over fields", () => {
+  const { col, mk } = build2();
+  mk(["colour", "x"]);
+  mk(["color", "x"]);
+  assert.equal(searchCards(col, "re:colou?r").length, 2);
+  assert.equal(searchCards(col, "re:colou+r").length, 1);
+  assert.equal(searchCards(col, "re:[").length, 0); // invalid regex matches nothing
+});
+
+test("is:learn is queue-based; buried split into manually/sibling", () => {
+  const { col, mk } = build2();
+  mk(undefined, { type: CardType.Relearning, queue: CardQueue.Learning });
+  mk(undefined, { type: CardType.Learning, queue: CardQueue.Suspended }); // not in a learning queue
+  mk(undefined, { queue: CardQueue.UserBuried });
+  mk(undefined, { queue: CardQueue.SchedBuried });
+  assert.equal(searchCards(col, "is:learn").length, 1);
+  assert.equal(searchCards(col, "is:buried").length, 2);
+  assert.equal(searchCards(col, "is:buried-manually").length, 1);
+  assert.equal(searchCards(col, "is:buried-sibling").length, 1);
+});
+
+test("rated: matches recent answers, optionally by button", () => {
+  const { col, mk } = build2();
+  const c1 = mk();
+  const c2 = mk();
+  const now = Date.now();
+  col.addRevlog(new Revlog({ id: now - 3600 * 1000, cid: c1.id, ease: 1 }));
+  col.addRevlog(new Revlog({ id: now - 40 * 86400 * 1000, cid: c2.id, ease: 3 }));
+  assert.equal(searchCards(col, "rated:2").length, 1);
+  assert.equal(searchCards(col, "rated:2:1").length, 1); // again-button
+  assert.equal(searchCards(col, "rated:2:3").length, 0);
+  assert.equal(searchCards(col, "rated:60").length, 2);
+});
+
+test("introduced: and edited: use scheduling-day windows", () => {
+  const { col, mk } = build2();
+  const c1 = mk();
+  col.addRevlog(new Revlog({ id: Date.now() - 3600 * 1000, cid: c1.id, ease: 3 }));
+  assert.equal(searchCards(col, "introduced:2").length, 1);
+  assert.ok(searchCards(col, "edited:2").length >= 1); // notes freshly created
+});
+
+test("prop:s / prop:d read FSRS memory state", () => {
+  const { col, mk } = build2();
+  const card = mk();
+  card.memoryState = { stability: 42.5, difficulty: 3.3 };
+  mk();
+  assert.equal(searchCards(col, "prop:s>30").length, 1);
+  assert.equal(searchCards(col, "prop:d<4").length, 1);
+  assert.equal(searchCards(col, "prop:stability<30").length, 0); // NaN never matches
+});
+
+test("deck: supports wildcards", () => {
+  const { col, mk } = build2();
+  const fr = col.addDeck("Lang::French");
+  const de = col.addDeck("Lang::German");
+  mk(undefined, { did: fr.id });
+  mk(undefined, { did: de.id });
+  assert.equal(searchCards(col, '"deck:Lang::*"').length, 2);
+  assert.equal(searchCards(col, '"deck:*French"').length, 1);
+});
