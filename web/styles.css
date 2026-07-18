@@ -286,7 +286,18 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 .pv-pair .card-face { min-height: 0; padding: 12px; font-size: 15px; }
 .pv-pair .card-face .card { padding: 12px; }
 
-/* ⓘ info bubbles on settings */
+/* Minimal SVG icons */
+.ic { display: inline-flex; align-items: center; vertical-align: -2px; }
+.ic svg {
+  width: 14px; height: 14px;
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.ic svg.fill { fill: currentColor; stroke: none; }
+button .ic { margin-right: 2px; }
+.flag-dot .ic svg { width: 13px; height: 13px; }
+
+/* info bubbles on settings */
 .lbl-row { display: inline-flex; align-items: center; gap: 4px; }
 .info-btn {
   padding: 0 4px; font-size: 13px; line-height: 1; background: transparent;

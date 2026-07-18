@@ -58,6 +58,26 @@ function debounced(fn, ms = 180) {
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 }
 
+// --- minimal inline SVG icons (no emoji; stroke/fill follow currentColor) ---
+
+const ICONS = {
+  pencil: '<svg viewBox="0 0 24 24"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></svg>',
+  trash: '<svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/></svg>',
+  sliders: '<svg viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>',
+  bolt: '<svg viewBox="0 0 24 24" class="fill"><path d="M13 2 3 14h7l-1 8 11-13h-7l1-7z"/></svg>',
+  eject: '<svg viewBox="0 0 24 24"><path d="M5 14l7-8 7 8H5z"/><path d="M5 18h14"/></svg>',
+  image: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
+  flag: '<svg viewBox="0 0 24 24" class="fill"><path d="M5 2h2v20H5z"/><path d="M7 3h13l-3 4.5L20 12H7z"/></svg>',
+  funnel: '<svg viewBox="0 0 24 24"><path d="M22 3H2l8 9.5V21l4-2v-6.5z"/></svg>',
+  info: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>',
+  x: '<svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+};
+
+/** A minimal inline SVG icon. */
+function icon(name) {
+  return el("span", { class: "ic", html: ICONS[name] ?? "" });
+}
+
 /** A valid model id: the preferred one if it exists, else the first model. */
 function validModelId(preferred) {
   if (preferred != null && state.col.models[String(preferred)]) return String(preferred);
@@ -226,7 +246,7 @@ function richEditor(initialHtml = "") {
     tbBtn("1.", "Numbered list", () => cmd("insertOrderedList")),
     tbBtn("T̶", "Clear formatting", () => cmd("removeFormat")),
     tbBtn("[…]", "Cloze (Ctrl+Shift+C)", wrapCloze),
-    tbBtn("🖼", "Insert image/audio/video (or drag & drop / paste)", () => {
+    tbBtn(icon("image"), "Insert image/audio/video (or drag & drop / paste)", () => {
       const inp = el("input", { type: "file", accept: "image/*,audio/*,video/*" });
       inp.addEventListener("change", () => { if (inp.files[0]) insertMedia(inp.files[0]); });
       inp.click();
@@ -516,7 +536,7 @@ function renderCustomStudy(sourceDeckId) {
         "How far into the future to pull reviews from when using Review ahead."),
       field("Search (for 'matching a search')", searchInput,
         "Plain text matched against note fields and tags. For full search syntax (deck:, flag:red, prop: …), use Browse → Create Filtered Deck instead."),
-      el("p", { class: "muted" }, "Builds a temporary filtered deck. Empty it from the deck list (⏏) to return cards to their home decks."),
+      el("p", { class: "muted" }, "Builds a temporary filtered deck. Empty it from the deck list (eject) to return cards to their home decks."),
       el("div", { class: "row" }, el("button", { onclick: build }, "Build & Study")),
     ),
   );
@@ -533,14 +553,14 @@ function renderDecks() {
     const leaf = d.name.split("::").pop();
     const actions = d.dyn
       ? el("span", { class: "deck-actions" },
-          el("button", { class: "icon", title: "Rename", onclick: (e) => { e.stopPropagation(); renameDeckPrompt(d); } }, "✎"),
-          el("button", { class: "icon", title: "Empty (return cards home and remove deck)", onclick: (e) => { e.stopPropagation(); emptyFilteredDeck(d); } }, "⏏"))
+          el("button", { class: "icon", title: "Rename", onclick: (e) => { e.stopPropagation(); renameDeckPrompt(d); } }, icon("pencil")),
+          el("button", { class: "icon", title: "Empty (return cards home and remove deck)", onclick: (e) => { e.stopPropagation(); emptyFilteredDeck(d); } }, icon("eject")))
       : el("span", { class: "deck-actions" },
-          el("button", { class: "icon", title: "Custom study", onclick: (e) => { e.stopPropagation(); renderCustomStudy(d.id); } }, "⚡"),
-          el("button", { class: "icon", title: "Options", onclick: (e) => { e.stopPropagation(); renderDeckOptions(d.id); } }, "⚙"),
-          el("button", { class: "icon", title: "Rename", onclick: (e) => { e.stopPropagation(); renameDeckPrompt(d); } }, "✎"),
+          el("button", { class: "icon", title: "Custom study", onclick: (e) => { e.stopPropagation(); renderCustomStudy(d.id); } }, icon("bolt")),
+          el("button", { class: "icon", title: "Options", onclick: (e) => { e.stopPropagation(); renderDeckOptions(d.id); } }, icon("sliders")),
+          el("button", { class: "icon", title: "Rename", onclick: (e) => { e.stopPropagation(); renameDeckPrompt(d); } }, icon("pencil")),
           Number(d.id) === 1 ? "" :
-            el("button", { class: "icon", title: "Delete", onclick: (e) => { e.stopPropagation(); deleteDeckPrompt(d); } }, "🗑"),
+            el("button", { class: "icon", title: "Delete", onclick: (e) => { e.stopPropagation(); deleteDeckPrompt(d); } }, icon("trash")),
         );
     const row = el("div", { class: "deck", onclick: () => startStudy(d.id) },
       el("span", { class: "name", style: `padding-left:${depth * 18}px` }, leaf),
@@ -588,7 +608,7 @@ function renderStudy() {
   const back = el("div", { class: "crumbs", onclick: renderDecks }, "← Decks");
 
   if (!card) {
-    show(back, el("p", { class: "center" }, "🎉 All caught up — nothing due in this deck."));
+    show(back, el("p", { class: "center" }, "All caught up — nothing due in this deck."));
     return;
   }
   const { note, noteType } = noteTypeAndNote(card);
@@ -801,7 +821,7 @@ function renderAddCard() {
       el("div", { class: "row" },
         el("button", { onclick: save }, "Save"),
         el("button", { onclick: renderImportCsv }, "Import CSV/TSV"),
-        el("button", { onclick: renderImageOcclusion }, "🖼 Image Occlusion"),
+        el("button", { onclick: renderImageOcclusion }, "Image Occlusion"),
       ),
       previewBox,
     ),
@@ -925,7 +945,7 @@ function quoteTerm(term) {
 /**
  * Create a named, persistent filtered deck from a browse query. Membership is
  * the set of cards matching *right now* — later tag/field changes don't alter
- * it. The deck lives in the deck list until you empty it (⏏), which returns
+ * it. The deck lives in the deck list until you empty it (eject), which returns
  * its cards home.
  */
 async function createFilteredDeckFromSearch(query) {
@@ -1027,7 +1047,7 @@ function renderBrowse(query = "") {
       Object.values(filters).forEach((s) => s.clear());
       sidebar.querySelectorAll(".side-item.on").forEach((n) => n.classList.remove("on"));
       renderRows(effectiveQuery());
-    } }, "✕ Clear filters"),
+    } }, icon("x"), " Clear filters"),
     section("Today",
       sideItem("today", "Due today", "is:due"),
       sideItem("today", "Overdue", "is:due prop:due<0"),
@@ -1048,7 +1068,7 @@ function renderBrowse(query = "") {
     section("Flags",
       ...FLAG_NAMES.map((name, i) =>
         sideItem("flags", name, `flag:${i ? name.toLowerCase() : "none"}`,
-          i ? el("span", { class: `flag-dot f${i}` }, "⚑") : null, `f${i} `)),
+          i ? el("span", { class: `flag-dot f${i}` }, icon("flag")) : null, `f${i} `)),
     ),
     section("Decks",
       ...decks.map((d) => {
@@ -1085,7 +1105,7 @@ function renderBrowse(query = "") {
           class: `browse-row${note.id === selectedNoteId ? " selected" : ""}`,
           onclick: () => (isDesktop() ? openInPane(note.id) : renderEditNote(note.id)),
         },
-          flag ? el("span", { class: `flag-dot f${flag}`, title: FLAG_NAMES[flag] }, "⚑") : "",
+          flag ? el("span", { class: `flag-dot f${flag}`, title: FLAG_NAMES[flag] }, icon("flag")) : "",
           el("span", { class: "br-title" }, title),
           el("span", { class: "br-deck" }, deckName(card.did)),
           el("span", { class: `br-state ${cardStateLabel(card)}` }, cardStateLabel(card)),
@@ -1103,9 +1123,9 @@ function renderBrowse(query = "") {
     el("div", { class: "decks-head" },
       el("h2", {}, "Browse"),
       el("div", { class: "row" },
-        el("button", { class: "side-toggle", onclick: () => sidebar.classList.toggle("open") }, "☰ Filters"),
+        el("button", { class: "side-toggle", onclick: () => sidebar.classList.toggle("open") }, icon("funnel"), " Filters"),
         el("button", { title: "Create a persistent deck holding the cards that match the current filters + search",
-          onclick: () => createFilteredDeckFromSearch(effectiveQuery()) }, "⚡ Create Filtered Deck"),
+          onclick: () => createFilteredDeckFromSearch(effectiveQuery()) }, "Create Filtered Deck"),
       ),
     ),
     search,
@@ -1191,7 +1211,7 @@ function renderEditNote(noteId) {
 // --- deck options ---
 
 /**
- * A little ⓘ next to a setting that toggles an inline explanation.
+ * A little info icon next to a setting that toggles an inline explanation.
  * Tap-friendly (tooltips don't exist on touch); the text also lives in
  * `title` for desktop hover.
  */
@@ -1205,11 +1225,11 @@ function infoBubble(text) {
       e.stopPropagation();
       tip.style.display = tip.style.display === "none" ? "" : "none";
     },
-  }, "ⓘ");
+  }, icon("info"));
   return { btn, tip };
 }
 
-/** An ⓘ whose explanation reveals right where it sits (for inline labels). */
+/** An info icon whose explanation reveals right where it sits (for inline labels). */
 function infoBubbleInline(text) {
   const { btn, tip } = infoBubble(text);
   return el("span", { class: "lbl-inline-info" }, btn, tip);
@@ -1421,7 +1441,7 @@ async function applyToNoteCards(note, fn, { meta = false } = {}) {
 
 /** Anki's seven card flags (index = flag number; 0 = none). */
 const FLAG_NAMES = ["No flag", "Red", "Orange", "Green", "Blue", "Pink", "Turquoise", "Purple"];
-const flagOptions = () => FLAG_NAMES.map((l, i) => el("option", { value: i }, i ? `⚑ ${l}` : l));
+const flagOptions = () => FLAG_NAMES.map((l, i) => el("option", { value: i }, l));
 
 /** A row of note-level operations (applied to all the note's cards). */
 function noteActions(note, onDone) {
@@ -1459,7 +1479,7 @@ function reviewMoreBar() {
   flagSel.value = String(card.flags & 7);
   flagSel.addEventListener("change", () => act((s, c) => s.setFlag(c, Number(flagSel.value))));
   return el("div", { class: "more-bar" },
-    el("button", { class: "icon", onclick: () => renderEditNote(note.id) }, "✎ Edit"),
+    el("button", { class: "icon", onclick: () => renderEditNote(note.id) }, icon("pencil"), " Edit"),
     el("button", { class: "icon", onclick: () => act((s, c) => s.buryCard(c)) }, "Bury"),
     el("button", { class: "icon", onclick: () => act((s, c) => s.suspend(c)) }, "Suspend"),
     el("button", { class: "icon", onclick: () => { if (confirm("Reset to new?")) act((s, c) => s.forget(c), true); } }, "Forget"),
@@ -1544,7 +1564,7 @@ async function renderImageOcclusion() {
 
   const refresh = () => {
     maskList.replaceChildren(...masks.map((m, i) =>
-      el("button", { class: "io-maskchip", onclick: () => { masks.splice(i, 1); refresh(); } }, `Mask ${i + 1} ✕`)));
+      el("button", { class: "io-maskchip", onclick: () => { masks.splice(i, 1); refresh(); } }, `Mask ${i + 1} ×`)));
     stage.replaceChildren();
     if (!imageName) {
       stage.append(el("p", { class: "muted" }, "Choose an image, then drag on it to draw masks."));
@@ -1671,7 +1691,7 @@ function renderEditNoteType(mid) {
       const inp = el("input", { type: "text", value: f.name });
       fieldNameInputs.push({ ord: i, inp });
       const rm = el("button", { class: "icon", title: "Remove field",
-        onclick: async () => { state.col.removeField(mid, i); await persistAll(); renderEditNoteType(mid); } }, "🗑");
+        onclick: async () => { state.col.removeField(mid, i); await persistAll(); renderEditNoteType(mid); } }, icon("trash"));
       return el("div", { class: "nt-row" }, inp, nt.flds.length > 1 ? rm : "");
     }));
   };
@@ -1687,7 +1707,7 @@ function renderEditNoteType(mid) {
       const afmt = el("textarea", { class: "mono" }); afmt.value = t.afmt;
       tmplInputs.push({ ord: i, name, qfmt, afmt });
       const rm = el("button", { class: "icon", title: "Remove template",
-        onclick: async () => { state.col.removeTemplate(mid, i); await persistAll(); renderEditNoteType(mid); } }, "🗑");
+        onclick: async () => { state.col.removeTemplate(mid, i); await persistAll(); renderEditNoteType(mid); } }, icon("trash"));
       return el("div", { class: "nt-tmpl" },
         el("div", { class: "nt-tmpl-head" }, name, (!isCloze && nt.tmpls.length > 1) ? rm : ""),
         el("label", {}, "Front template", qfmt),
