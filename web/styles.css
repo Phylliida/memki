@@ -253,6 +253,26 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 .br-state.review { color: var(--good); }
 .br-state.suspended { color: var(--again); }
 
+/* Create Filtered Deck popout */
+.pop-anchor { position: relative; }
+.pop-panel {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 30;
+  width: 360px; max-width: calc(100vw - 24px);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  display: flex; flex-direction: column; gap: 8px; text-align: left;
+}
+.pop-panel h3 { margin: 0; font-size: 15px; color: var(--text); }
+.pop-panel code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; font-size: 12px; word-break: break-all; }
+.pop-panel input {
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 9px; font-size: 15px;
+}
+.pop-filter { font-size: 13px; line-height: 1.6; }
+.pop-src { font-size: 12.5px; }
+.pop-err { color: var(--again); font-size: 13px; }
+.pop-panel .row { display: flex; gap: 8px; }
+
 /* Browse filter tabs */
 .filter-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 12px; }
 .ftab { padding: 5px 12px; font-size: 13px; border-radius: 14px; display: inline-flex; align-items: center; gap: 6px; }

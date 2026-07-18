@@ -947,28 +947,24 @@ function quoteTerm(term) {
  * the set of cards matching *right now* — later tag/field changes don't alter
  * it. The deck lives in the deck list until you empty it (eject), which returns
  * its cards home.
+ * @returns {Promise<{ ok: boolean, msg: string }>}
  */
-async function createFilteredDeckFromSearch(query) {
+async function createFilteredDeck(query, name) {
   let pred;
-  try { pred = compileSearch(query); } catch { setStatus("Invalid search."); return; }
-  const name = prompt("Filtered deck name:");
-  if (!name || !name.trim()) return;
-  if (Object.values(state.col.decks).some((d) => d.name === name.trim())) {
-    setStatus(`A deck named "${name.trim()}" already exists.`);
-    return;
+  try { pred = compileSearch(query); } catch { return { ok: false, msg: "Invalid search." }; }
+  if (Object.values(state.col.decks).some((d) => d.name === name)) {
+    return { ok: false, msg: `A deck named "${name}" already exists.` };
   }
   const ctx = searchContext(state.col);
   const sched = new Scheduler(state.col, { fuzz: true });
-  const fd = state.col.createFilteredDeck(name.trim());
+  const fd = state.col.createFilteredDeck(name);
   const count = sched.buildFiltered(fd.id, (c) => pred(c, ctx));
   if (!count) {
     delete state.col.decks[String(fd.id)];
-    setStatus("No cards match this filter.");
-    return;
+    return { ok: false, msg: "No cards match this filter." };
   }
   await persistAll();
-  setStatus(`Created "${name.trim()}" — ${count} cards.`);
-  renderDecks();
+  return { ok: true, msg: `Created "${name}" — ${count} cards.` };
 }
 
 /** Does `term` appear as a whole token (or phrase) inside a query string? */
@@ -1154,7 +1150,59 @@ function renderBrowse() {
       search.classList.remove("ro");
     }
     syncChips();
+    createPanel.style.display = "none"; // filters changed → stale panel closes
     renderRows(currentQuery());
+  };
+
+  // --- Create Filtered Deck popout: shows exactly which filters feed the
+  // deck and how many cards match, then asks for a name. ---
+  const createPanel = el("div", { class: "pop-panel" });
+  createPanel.style.display = "none";
+  const buildCreatePanel = () => {
+    const q = currentQuery();
+    let count = 0;
+    try {
+      const pred = compileSearch(q);
+      const ctx = searchContext(state.col);
+      count = [...state.col.cards.values()].filter((c) => pred(c, ctx)).length;
+    } catch { /* count stays 0 */ }
+    const sources = state.browseViewAll
+      ? tabs.map((t, i) => ({ label: `Filter ${i + 1}`, q: t.q.trim() })).filter((s) => s.q)
+      : [{ label: `Filter ${state.browseActive + 1}`, q: activeTab().q.trim() }];
+    const nameInput = el("input", { type: "text", placeholder: "Deck name" });
+    const err = el("div", { class: "pop-err" });
+    const create = async () => {
+      const name = nameInput.value.trim();
+      if (!name) { err.textContent = "Give the deck a name."; return; }
+      const r = await createFilteredDeck(q, name);
+      if (!r.ok) { err.textContent = r.msg; return; }
+      setStatus(r.msg);
+      renderDecks();
+    };
+    nameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") create(); });
+    createPanel.replaceChildren(
+      el("h3", {}, "Create Filtered Deck"),
+      el("div", { class: "muted pop-src" },
+        state.browseViewAll ? "Union of all filters — a card in any of:" : "Cards matching the selected filter:"),
+      ...sources.map((s) => el("div", { class: "pop-filter" },
+        el("b", {}, s.label), " ", el("code", {}, s.q || "(empty — matches every card)"))),
+      el("div", { class: "muted" }, `${count} matching card${count === 1 ? "" : "s"} right now (membership is frozen at creation)`),
+      nameInput,
+      err,
+      el("div", { class: "row" },
+        el("button", { onclick: create }, "Create"),
+        el("button", { onclick: () => { createPanel.style.display = "none"; } }, "Cancel"),
+      ),
+    );
+  };
+  const toggleCreatePanel = () => {
+    if (createPanel.style.display === "none") {
+      buildCreatePanel();
+      createPanel.style.display = "";
+      createPanel.querySelector("input")?.focus();
+    } else {
+      createPanel.style.display = "none";
+    }
   };
 
   const renderRows = (qstr) => {
@@ -1193,10 +1241,11 @@ function renderBrowse() {
     el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
     el("div", { class: "decks-head" },
       el("h2", {}, "Browse"),
-      el("div", { class: "row" },
+      el("div", { class: "row pop-anchor" },
         el("button", { class: "side-toggle", onclick: () => sidebar.classList.toggle("open") }, icon("funnel"), " Filters"),
-        el("button", { title: "Create a persistent deck from the current view (the active filter, or the union when All filters is selected)",
-          onclick: () => createFilteredDeckFromSearch(currentQuery()) }, "Create Filtered Deck"),
+        el("button", { title: "Create a persistent deck from the current view (the selected filter, or the union when All filters is selected)",
+          onclick: toggleCreatePanel }, "Create Filtered Deck"),
+        createPanel,
       ),
     ),
     search,
