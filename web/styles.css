@@ -273,6 +273,42 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 .pop-err { color: var(--again); font-size: 13px; }
 .pop-panel .row { display: flex; gap: 8px; }
 
+/* Flag bubbles (immediate set; one flag per card) */
+.flag-picker { display: inline-flex; gap: 4px; align-items: center; }
+.flag-bub {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0; border-radius: 50%;
+  background: transparent; border: 1px solid var(--border);
+}
+.flag-bub .ic svg { width: 12px; height: 12px; }
+.flag-bub.f1 { color: #ff6b6b; }
+.flag-bub.f2 { color: #ffa94d; }
+.flag-bub.f3 { color: #8ce99a; }
+.flag-bub.f4 { color: #74c0fc; }
+.flag-bub.f5 { color: #f783ac; }
+.flag-bub.f6 { color: #3bc9db; }
+.flag-bub.f7 { color: #b197fc; }
+.flag-bub.f1.on { background: #ff6b6b; border-color: #ff6b6b; }
+.flag-bub.f2.on { background: #ffa94d; border-color: #ffa94d; }
+.flag-bub.f3.on { background: #8ce99a; border-color: #8ce99a; }
+.flag-bub.f4.on { background: #74c0fc; border-color: #74c0fc; }
+.flag-bub.f5.on { background: #f783ac; border-color: #f783ac; }
+.flag-bub.f6.on { background: #3bc9db; border-color: #3bc9db; }
+.flag-bub.f7.on { background: #b197fc; border-color: #b197fc; }
+.flag-bub.on { color: #10131a; }
+
+/* Tag bubbles in the note editor */
+.form-tags { display: flex; flex-direction: column; gap: 6px; }
+.tag-lbl { font-size: 14px; }
+.tag-bubbles { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; position: relative; }
+.tag-bub {
+  padding: 4px 12px; border-radius: 14px; font-size: 13px;
+  background: var(--panel-2); border: 1px solid var(--border);
+}
+.tag-bub.on { background: var(--accent); border-color: var(--accent); color: #10131a; font-weight: 600; }
+.tag-bub.ghost { border-style: dashed; color: var(--muted); background: transparent; }
+.tag-pop { left: 0; right: auto; top: calc(100% + 6px); }
+
 /* Browse filter tabs */
 .filter-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 12px; }
 .ftab { padding: 5px 12px; font-size: 13px; border-radius: 14px; display: inline-flex; align-items: center; gap: 6px; }

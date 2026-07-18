@@ -1022,6 +1022,7 @@ function renderBrowse() {
         renderRows(currentQuery());
       },
       onCardsChanged: () => { renderRows(currentQuery()); openInPane(noteId); },
+      onTagsChanged: () => { refreshSidebarTags(); renderRows(currentQuery()); },
     }));
     renderRows(currentQuery()); // refresh row highlight
   };
@@ -1049,9 +1050,19 @@ function renderBrowse() {
     el("div", { class: "side-sec" }, el("h4", {}, title), ...items);
 
   const decks = Object.values(state.col.decks).sort((a, b) => a.name.localeCompare(b.name));
-  const tagSet = new Set();
-  for (const n of state.col.notes.values()) for (const t of n.tags) tagSet.add(t);
-  const tags = [...tagSet].sort((a, b) => a.localeCompare(b));
+
+  // Tag chips rebuild whenever a note's tags change (e.g. a tag added in the
+  // edit pane appears as a filter immediately).
+  const tagItems = el("div");
+  const refreshSidebarTags = () => {
+    const tagSet = new Set();
+    for (const n of state.col.notes.values()) for (const t of n.tags) tagSet.add(t);
+    tagItems.replaceChildren(
+      sideItem("Untagged", "tag:none"),
+      ...[...tagSet].sort((a, b) => a.localeCompare(b)).map((t) => sideItem(t, quoteTerm(`tag:${t}`))),
+    );
+    syncChips();
+  };
 
   const sidebar = el("aside", { class: "browse-side" },
     el("div", { class: "side-item side-clear muted", onclick: () => {
@@ -1091,10 +1102,7 @@ function renderBrowse() {
     section("Note types",
       ...Object.values(state.col.models).map((m) => sideItem(m.name, quoteTerm(`note:${m.name}`))),
     ),
-    section("Tags",
-      sideItem("Untagged", "tag:none"),
-      ...tags.map((t) => sideItem(t, quoteTerm(`tag:${t}`))),
-    ),
+    section("Tags", tagItems),
   );
 
   const syncChips = () => {
@@ -1252,6 +1260,7 @@ function renderBrowse() {
     tabsBar,
     el("div", { class: "browse-layout" }, sidebar, list, editPane),
   );
+  refreshSidebarTags();
   sync();
 }
 
@@ -1259,7 +1268,7 @@ function renderBrowse() {
  * The note editor form, shared by the full-page editor (mobile) and the
  * browse side pane (desktop). Editing a note edits every card of that note.
  * @param {number} noteId
- * @param {{ onSaved?: () => void, onDeleted?: () => void, onCardsChanged?: () => void }} cb
+ * @param {{ onSaved?: () => void, onDeleted?: () => void, onCardsChanged?: () => void, onTagsChanged?: () => void }} cb
  */
 function noteEditorForm(noteId, cb = {}) {
   const note = state.col.notes.get(noteId);
@@ -1267,11 +1276,66 @@ function noteEditorForm(noteId, cb = {}) {
   const model = state.col.noteType(note.mid);
 
   const inputs = model.flds.map((f) => ({ f, ed: richEditor(note.fields[f.ord] ?? "") }));
-  const tagsInput = el("input", { type: "text", value: (note.tags ?? []).join(" ") });
+
+  // Tags are bubbles: one per tag in the collection, toggled on/off for this
+  // note and persisted immediately; "+ New tag" opens a small popout.
+  const noteTags = new Set(note.tags ?? []);
+  const allTags = () => {
+    const s = new Set(noteTags);
+    for (const n of state.col.notes.values()) for (const t of n.tags) s.add(t);
+    return [...s].sort((a, b) => a.localeCompare(b));
+  };
+  const applyTags = async () => {
+    note.tags = [...noteTags].sort((a, b) => a.localeCompare(b));
+    note.mod = Math.floor(Date.now() / 1000);
+    await putNote(state.db, note);
+    cb.onTagsChanged?.();
+  };
+  const tagBox = el("div", { class: "tag-bubbles" });
+  const newTagPop = el("div", { class: "pop-panel tag-pop" });
+  newTagPop.style.display = "none";
+  {
+    const inp = el("input", { type: "text", placeholder: "tag-name (no spaces)" });
+    const addIt = async () => {
+      const t = inp.value.trim().replace(/\s+/g, "_");
+      if (!t) return;
+      noteTags.add(t);
+      inp.value = "";
+      newTagPop.style.display = "none";
+      await applyTags();
+      renderTags();
+    };
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addIt(); } });
+    newTagPop.append(
+      el("h3", {}, "New tag"),
+      inp,
+      el("div", { class: "row" },
+        el("button", { type: "button", onclick: addIt }, "Add"),
+        el("button", { type: "button", onclick: () => { newTagPop.style.display = "none"; } }, "Cancel")),
+    );
+  }
+  const renderTags = () => {
+    tagBox.replaceChildren(
+      ...allTags().map((t) =>
+        el("button", {
+          type: "button", class: `tag-bub${noteTags.has(t) ? " on" : ""}`,
+          onclick: async () => {
+            if (noteTags.has(t)) noteTags.delete(t); else noteTags.add(t);
+            await applyTags();
+            renderTags();
+          },
+        }, t)),
+      el("button", { type: "button", class: "tag-bub ghost", onclick: () => {
+        newTagPop.style.display = newTagPop.style.display === "none" ? "" : "none";
+        if (newTagPop.style.display === "") newTagPop.querySelector("input")?.focus();
+      } }, "+ New tag"),
+      newTagPop,
+    );
+  };
+  renderTags();
 
   const save = async () => {
     note.fields = inputs.map(({ ed }) => ed.getHTML());
-    note.tags = tagsInput.value.split(/\s+/).filter(Boolean);
     note.mod = Math.floor(Date.now() / 1000);
     note.normalize(model.sortf ?? 0);
     await putNote(state.db, note);
@@ -1305,7 +1369,7 @@ function noteEditorForm(noteId, cb = {}) {
     el("div", { class: "muted ne-head" },
       `${model.name} · ${cardCount} card${cardCount === 1 ? "" : "s"} share this note`),
     ...inputs.map(({ f, ed }) => el("label", {}, f.name, ed.el)),
-    el("label", {}, "Tags", tagsInput),
+    el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Tags"), tagBox),
     el("div", { class: "row" },
       el("button", { onclick: save }, "Save"),
       el("button", { class: "danger", onclick: del }, "Delete"),
@@ -1562,15 +1626,27 @@ async function applyToNoteCards(note, fn, { meta = false } = {}) {
 
 /** Anki's seven card flags (index = flag number; 0 = none). */
 const FLAG_NAMES = ["No flag", "Red", "Orange", "Green", "Blue", "Pink", "Turquoise", "Purple"];
-const flagOptions = () => FLAG_NAMES.map((l, i) => el("option", { value: i }, l));
+
+/**
+ * Seven flag bubbles; the current one is filled. Clicking sets immediately;
+ * clicking the active one clears the flag (a card has at most one flag).
+ */
+function flagPicker(current, onPick) {
+  return el("span", { class: "flag-picker" },
+    ...[1, 2, 3, 4, 5, 6, 7].map((n) =>
+      el("button", {
+        type: "button",
+        class: `flag-bub f${n}${n === current ? " on" : ""}`,
+        title: n === current ? `${FLAG_NAMES[n]} (click to clear)` : FLAG_NAMES[n],
+        onclick: () => onPick(n === current ? 0 : n),
+      }, icon("flag"))));
+}
 
 /** A row of note-level operations (applied to all the note's cards). */
 function noteActions(note, onDone) {
   const cards = state.col.cardsForNote(note.id);
   const anySusp = cards.some((c) => c.queue === CardQueue.Suspended);
   const decks = Object.values(state.col.decks).filter((d) => !d.dyn);
-  const flagSel = el("select", {}, ...flagOptions());
-  flagSel.value = String((cards[0]?.flags ?? 0) & 7);
   const moveSel = el("select", {}, ...decks.map((d) => el("option", { value: d.id }, d.name)));
   moveSel.value = String(cards[0]?.did ?? 1);
   const act = async (fn, meta) => { await applyToNoteCards(note, fn, { meta }); onDone(); };
@@ -1580,7 +1656,7 @@ function noteActions(note, onDone) {
     el("button", { onclick: () => act((s, c) => s.buryCard(c)) }, "Bury"),
     el("button", { onclick: () => { if (confirm("Reset these cards to new?")) act((s, c) => s.forget(c), true); } }, "Forget"),
     el("button", { onclick: () => { const d = Number(prompt("Due in how many days?", "1")); if (Number.isFinite(d)) act((s, c) => s.setDueDate(c, d)); } }, "Set Due"),
-    el("span", { class: "na-group" }, "Flag", flagSel, el("button", { onclick: () => act((s, c) => s.setFlag(c, Number(flagSel.value))) }, "Set")),
+    el("span", { class: "na-group" }, "Flag", flagPicker((cards[0]?.flags ?? 0) & 7, (n) => act((s, c) => s.setFlag(c, n)))),
     el("span", { class: "na-group" }, "Move", moveSel, el("button", { onclick: () => act((s, c) => s.moveCard(c, Number(moveSel.value))) }, "Go")),
   );
 }
@@ -1596,16 +1672,13 @@ function reviewMoreBar() {
     if (meta) await putMeta(state.db, state.col);
     renderStudy();
   };
-  const flagSel = el("select", { class: "flag-sel", title: "Flag" }, ...flagOptions());
-  flagSel.value = String(card.flags & 7);
-  flagSel.addEventListener("change", () => act((s, c) => s.setFlag(c, Number(flagSel.value))));
   return el("div", { class: "more-bar" },
     el("button", { class: "icon", onclick: () => renderEditNote(note.id) }, icon("pencil"), " Edit"),
     el("button", { class: "icon", onclick: () => act((s, c) => s.buryCard(c)) }, "Bury"),
     el("button", { class: "icon", onclick: () => act((s, c) => s.suspend(c)) }, "Suspend"),
     el("button", { class: "icon", onclick: () => { if (confirm("Reset to new?")) act((s, c) => s.forget(c), true); } }, "Forget"),
     el("button", { class: "icon", onclick: () => { const d = Number(prompt("Due in days?", "1")); if (Number.isFinite(d)) act((s, c) => s.setDueDate(c, d)); } }, "Set Due"),
-    flagSel,
+    flagPicker(card.flags & 7, (n) => act((s, c) => s.setFlag(c, n))),
   );
 }
 
