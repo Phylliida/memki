@@ -971,20 +971,40 @@ async function createFilteredDeckFromSearch(query) {
   renderDecks();
 }
 
-function renderBrowse(query = "") {
+/** Does `term` appear as a whole token (or phrase) inside a query string? */
+function termInQuery(q, term) {
+  const esc = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|\\s)${esc}(?=\\s|$)`).test(q);
+}
+
+function renderBrowse() {
   state.card = null;
-  // Toggleable sidebar filters: OR within a section, AND across sections,
-  // free text from the search box AND'd on top. Persists across screens.
-  state.browseFilters ??= {
-    today: new Set(), cardState: new Set(), flags: new Set(),
-    decks: new Set(), notes: new Set(), tags: new Set(),
+  // Multiple filters: each filter is an AND of its terms (the text in the
+  // search bar is that filter's query, chips just edit the text); "All
+  // filters" shows the union (OR) of every non-empty filter.
+  state.browseTabs ??= [{ q: "" }];
+  state.browseActive ??= 0;
+  state.browseViewAll ??= false;
+  const tabs = state.browseTabs;
+  if (state.browseActive >= tabs.length) state.browseActive = 0;
+  const activeTab = () => tabs[state.browseActive];
+
+  const unionQuery = () => {
+    const parts = tabs.map((t) => t.q.trim()).filter(Boolean);
+    if (parts.length <= 1) return parts[0] ?? "";
+    return parts.map((p) => `(${p})`).join(" or ");
   };
-  const filters = state.browseFilters;
+  const currentQuery = () => (state.browseViewAll ? unionQuery() : activeTab().q);
 
   const search = el("input", {
-    class: "search", type: "search", value: query,
-    placeholder: 'Search — e.g. deck:Spanish tag:verb is:due prop:ivl>21 -flag:red',
-    oninput: (e) => { state.browseQuery = e.target.value; renderRows(effectiveQuery()); },
+    class: "search", type: "search", value: "",
+    placeholder: 'Filter query — e.g. deck:Spanish tag:verb is:due prop:ivl>21 -flag:red',
+    oninput: (e) => {
+      if (state.browseViewAll) return;
+      activeTab().q = e.target.value;
+      syncChips();
+      renderRows(currentQuery());
+    },
   });
   const list = el("div", { class: "browse-list" });
 
@@ -999,41 +1019,36 @@ function renderBrowse(query = "") {
   const openInPane = (noteId) => {
     selectedNoteId = noteId;
     editPane.replaceChildren(noteEditorForm(noteId, {
-      onSaved: () => renderRows(effectiveQuery()),
+      onSaved: () => renderRows(currentQuery()),
       onDeleted: () => {
         selectedNoteId = null;
         editPane.replaceChildren(panePlaceholder());
-        renderRows(effectiveQuery());
+        renderRows(currentQuery());
       },
-      onCardsChanged: () => { renderRows(effectiveQuery()); openInPane(noteId); },
+      onCardsChanged: () => { renderRows(currentQuery()); openInPane(noteId); },
     }));
-    renderRows(effectiveQuery()); // refresh row highlight
+    renderRows(currentQuery()); // refresh row highlight
   };
 
-  const effectiveQuery = () => {
-    const parts = [];
-    for (const set of Object.values(filters)) {
-      if (!set.size) continue;
-      const terms = [...set];
-      parts.push(terms.length > 1 ? `(${terms.join(" or ")})` : terms[0]);
+  // Toggling a chip edits the ACTIVE filter's text (and shows that filter,
+  // so you always see what you're changing).
+  const toggleTerm = (term) => {
+    const t = activeTab();
+    if (termInQuery(t.q, term)) {
+      const esc = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      t.q = t.q.replace(new RegExp(`(^|\\s)${esc}(?=\\s|$)`), " ").replace(/\s+/g, " ").trim();
+    } else {
+      t.q = `${t.q.trim()} ${term}`.trim();
     }
-    const text = search.value.trim();
-    if (text) parts.push(text);
-    return parts.join(" ");
+    state.browseViewAll = false;
+    sync();
   };
 
-  const sideItem = (sectionKey, label, term, extra = null, cls = "") => {
-    const set = filters[sectionKey];
-    const item = el("div", {
-      class: `side-item ${cls}${set.has(term) ? " on" : ""}`, title: term,
-      onclick: () => {
-        if (set.has(term)) { set.delete(term); item.classList.remove("on"); }
-        else { set.add(term); item.classList.add("on"); }
-        renderRows(effectiveQuery());
-      },
+  const sideItem = (label, term, extra = null, cls = "") =>
+    el("div", {
+      class: `side-item ${cls}`, "data-term": term, title: term,
+      onclick: () => toggleTerm(term),
     }, extra, label);
-    return item;
-  };
   const section = (title, ...items) =>
     el("div", { class: "side-sec" }, el("h4", {}, title), ...items);
 
@@ -1044,47 +1059,103 @@ function renderBrowse(query = "") {
 
   const sidebar = el("aside", { class: "browse-side" },
     el("div", { class: "side-item side-clear muted", onclick: () => {
-      Object.values(filters).forEach((s) => s.clear());
-      sidebar.querySelectorAll(".side-item.on").forEach((n) => n.classList.remove("on"));
-      renderRows(effectiveQuery());
-    } }, icon("x"), " Clear filters"),
+      activeTab().q = "";
+      state.browseViewAll = false;
+      sync();
+    } }, icon("x"), " Clear this filter"),
     section("Today",
-      sideItem("today", "Due today", "is:due"),
-      sideItem("today", "Overdue", "is:due prop:due<0"),
-      sideItem("today", "Added", "added:1"),
-      sideItem("today", "Edited", "edited:1"),
-      sideItem("today", "Studied", "rated:1"),
-      sideItem("today", "First review", "introduced:1"),
-      sideItem("today", "Rescheduled", "rated:1:0"),
-      sideItem("today", "Again", "rated:1:1"),
+      sideItem("Due today", "is:due"),
+      sideItem("Overdue", "is:due prop:due<0"),
+      sideItem("Added", "added:1"),
+      sideItem("Edited", "edited:1"),
+      sideItem("Studied", "rated:1"),
+      sideItem("First review", "introduced:1"),
+      sideItem("Rescheduled", "rated:1:0"),
+      sideItem("Again", "rated:1:1"),
     ),
     section("Card state",
-      sideItem("cardState", "New", "is:new"),
-      sideItem("cardState", "Learning", "is:learn"),
-      sideItem("cardState", "Review", "is:review"),
-      sideItem("cardState", "Suspended", "is:suspended"),
-      sideItem("cardState", "Buried", "is:buried"),
+      sideItem("New", "is:new"),
+      sideItem("Learning", "is:learn"),
+      sideItem("Review", "is:review"),
+      sideItem("Suspended", "is:suspended"),
+      sideItem("Buried", "is:buried"),
     ),
     section("Flags",
       ...FLAG_NAMES.map((name, i) =>
-        sideItem("flags", name, `flag:${i ? name.toLowerCase() : "none"}`,
+        sideItem(name, `flag:${i ? name.toLowerCase() : "none"}`,
           i ? el("span", { class: `flag-dot f${i}` }, icon("flag")) : null, `f${i} `)),
     ),
     section("Decks",
       ...decks.map((d) => {
         const depth = d.name.split("::").length - 1;
-        return sideItem("decks", d.name.split("::").pop(), quoteTerm(`deck:${d.name}`),
+        return sideItem(d.name.split("::").pop(), quoteTerm(`deck:${d.name}`),
           depth ? el("span", { class: "side-indent", style: `width:${depth * 12}px` }) : null);
       }),
     ),
     section("Note types",
-      ...Object.values(state.col.models).map((m) => sideItem("notes", m.name, quoteTerm(`note:${m.name}`))),
+      ...Object.values(state.col.models).map((m) => sideItem(m.name, quoteTerm(`note:${m.name}`))),
     ),
     section("Tags",
-      sideItem("tags", "Untagged", "tag:none"),
-      ...tags.map((t) => sideItem("tags", t, quoteTerm(`tag:${t}`))),
+      sideItem("Untagged", "tag:none"),
+      ...tags.map((t) => sideItem(t, quoteTerm(`tag:${t}`))),
     ),
   );
+
+  const syncChips = () => {
+    const q = activeTab().q;
+    sidebar.querySelectorAll(".side-item[data-term]").forEach((n) => {
+      n.classList.toggle("on", termInQuery(q, n.dataset.term));
+    });
+  };
+
+  // --- filter tabs: Filter 1 · Filter 2 · New filter · All filters ---
+  const tabsBar = el("div", { class: "filter-tabs" });
+  const renderTabs = () => {
+    tabsBar.replaceChildren(
+      ...tabs.map((t, i) =>
+        el("button", {
+          class: `ftab${!state.browseViewAll && i === state.browseActive ? " active" : ""}`,
+          title: t.q.trim() || "(empty filter)",
+          onclick: () => { state.browseActive = i; state.browseViewAll = false; sync(); },
+        },
+          `Filter ${i + 1}`,
+          tabs.length > 1
+            ? el("span", { class: "ftab-x", title: "Remove this filter", onclick: (e) => {
+                e.stopPropagation();
+                tabs.splice(i, 1);
+                if (state.browseActive >= tabs.length) state.browseActive = tabs.length - 1;
+                sync();
+              } }, icon("x"))
+            : null,
+        )),
+      el("button", { class: "ftab ghost", onclick: () => {
+        tabs.push({ q: "" });
+        state.browseActive = tabs.length - 1;
+        state.browseViewAll = false;
+        sync();
+      } }, "New filter"),
+      el("button", {
+        class: `ftab all${state.browseViewAll ? " active" : ""}`,
+        title: "Show the union of all filters (a card matching any filter)",
+        onclick: () => { state.browseViewAll = true; sync(); },
+      }, "All filters"),
+    );
+  };
+
+  const sync = () => {
+    renderTabs();
+    if (state.browseViewAll) {
+      search.value = unionQuery();
+      search.readOnly = true;
+      search.classList.add("ro");
+    } else {
+      search.value = activeTab().q;
+      search.readOnly = false;
+      search.classList.remove("ro");
+    }
+    syncChips();
+    renderRows(currentQuery());
+  };
 
   const renderRows = (qstr) => {
     let all;
@@ -1114,8 +1185,8 @@ function renderBrowse(query = "") {
       all.length > shown.length ? el("div", { class: "center" }, `…and ${all.length - shown.length} more (refine search)`) : "",
       all.length ? "" : el("div", { class: "center" }, "No matching cards."),
     );
-    const nf = Object.values(filters).reduce((n, s) => n + s.size, 0);
-    setStatus(`${all.length} card${all.length === 1 ? "" : "s"}${nf ? ` · ${nf} filter${nf > 1 ? "s" : ""} on` : ""}`);
+    const label = state.browseViewAll ? "All filters" : `Filter ${state.browseActive + 1}`;
+    setStatus(`${label} · ${all.length} card${all.length === 1 ? "" : "s"}`);
   };
 
   show(
@@ -1124,14 +1195,15 @@ function renderBrowse(query = "") {
       el("h2", {}, "Browse"),
       el("div", { class: "row" },
         el("button", { class: "side-toggle", onclick: () => sidebar.classList.toggle("open") }, icon("funnel"), " Filters"),
-        el("button", { title: "Create a persistent deck holding the cards that match the current filters + search",
-          onclick: () => createFilteredDeckFromSearch(effectiveQuery()) }, "Create Filtered Deck"),
+        el("button", { title: "Create a persistent deck from the current view (the active filter, or the union when All filters is selected)",
+          onclick: () => createFilteredDeckFromSearch(currentQuery()) }, "Create Filtered Deck"),
       ),
     ),
     search,
+    tabsBar,
     el("div", { class: "browse-layout" }, sidebar, list, editPane),
   );
-  renderRows(effectiveQuery());
+  sync();
 }
 
 /**
@@ -1195,7 +1267,7 @@ function noteEditorForm(noteId, cb = {}) {
 }
 
 function renderEditNote(noteId) {
-  const back = () => renderBrowse(state.browseQuery ?? "");
+  const back = () => renderBrowse();
   if (!state.col.notes.get(noteId)) return back();
   show(
     el("div", { class: "crumbs", onclick: back }, "← Browse"),
@@ -1926,7 +1998,7 @@ async function doExport() {
 
 function wireHeader() {
   document.getElementById("btn-add").addEventListener("click", renderAddCard);
-  document.getElementById("btn-browse").addEventListener("click", () => renderBrowse(state.browseQuery ?? ""));
+  document.getElementById("btn-browse").addEventListener("click", () => renderBrowse());
   document.getElementById("btn-stats").addEventListener("click", renderStats);
   document.getElementById("btn-types").addEventListener("click", renderNoteTypes);
   document.getElementById("btn-undo").addEventListener("click", doUndo);

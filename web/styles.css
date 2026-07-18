@@ -245,6 +245,16 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 .br-state.review { color: var(--good); }
 .br-state.suspended { color: var(--again); }
 
+/* Browse filter tabs */
+.filter-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 12px; }
+.ftab { padding: 5px 12px; font-size: 13px; border-radius: 14px; display: inline-flex; align-items: center; gap: 6px; }
+.ftab.active { border-color: var(--accent); background: var(--accent); color: #10131a; font-weight: 600; }
+.ftab.ghost { border-style: dashed; color: var(--muted); }
+.ftab-x { display: inline-flex; opacity: 0.7; }
+.ftab-x:hover { opacity: 1; }
+.ftab-x .ic svg { width: 11px; height: 11px; }
+.search.ro { opacity: 0.75; font-style: italic; }
+
 /* Browse sidebar */
 .browse-layout { display: flex; gap: 14px; align-items: flex-start; }
 .browse-side {
