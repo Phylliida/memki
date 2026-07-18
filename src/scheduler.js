@@ -14,8 +14,10 @@
 //
 // Deferred vs. Anki (documented, not silently dropped): interval fuzz is OFF by
 // default (deterministic, matching rslib's fuzz_factor=None test path); filtered
-// decks, preview, load balancing, sibling burying, the a*1000 "reps left today"
-// component of `left`, and leech actions beyond suspend are not yet implemented.
+// deck preview mode + custom ordering, FSRS load balancing, easy days, the v3
+// gather/sort order options (we gather by position/due date and put interday
+// learning before reviews rather than mixed), auto-advance, and the a*1000
+// "reps left today" component of `left` are not yet implemented.
 
 import { CardType, CardQueue, RevlogType, Revlog } from "./model.js";
 import { FSRS, DEFAULT_PARAMETERS } from "./fsrs.js";
