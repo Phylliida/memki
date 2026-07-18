@@ -238,3 +238,28 @@ test("reversed note type generates both cards; empty note generates none", () =>
   assert.deepEqual(cardOrdinalsForNote(nt, new Note({ mid: 2, fields: ["Q", ""] })), [0]);
   assert.deepEqual(cardOrdinalsForNote(nt, new Note({ mid: 2, fields: ["", ""] })), []);
 });
+
+test("cloneCardsIntoNewDeck: independent deck, fresh cards, own options", () => {
+  const col = Collection.createDefault();
+  const mid = Object.values(col.models).find((m) => m.name === "Basic").id;
+  const note = new Note({ mid, fields: ["Q", "A"], tags: ["bees"] }).normalize();
+  col.addNote(note);
+  const orig = col.addCard(new Card({ nid: note.id, did: 1, ord: 0, type: 2, queue: 2, ivl: 30, due: 500, reps: 9 }));
+
+  const { deck, count } = col.cloneCardsIntoNewDeck("Bees Redux", [orig, orig]); // dup input deduped
+  assert.equal(count, 1);
+  assert.equal(deck.dyn, 0); // a normal deck, not a dynamic one
+
+  const copy = [...col.cards.values()].find((c) => c.did === deck.id);
+  assert.equal(copy.nid, note.id);      // same global note
+  assert.equal(copy.type, 0);           // fresh new card
+  assert.equal(copy.reps, 0);
+  assert.notEqual(copy.id, orig.id);
+  // original untouched
+  assert.equal(orig.did, 1);
+  assert.equal(orig.ivl, 30);
+  assert.equal(orig.odid, 0);           // no filtered-deck bookkeeping
+  // its own options group, not shared with group 1
+  assert.notEqual(String(deck.conf), "1");
+  assert.equal(col.dconf[String(deck.conf)].name, "Bees Redux");
+});

@@ -943,10 +943,9 @@ function quoteTerm(term) {
 }
 
 /**
- * Create a named, persistent filtered deck from a browse query. Membership is
- * the set of cards matching *right now* — later tag/field changes don't alter
- * it. The deck lives in the deck list until you empty it (eject), which returns
- * its cards home.
+ * Create a new, fully independent deck from a browse query: fresh copies of
+ * the matching cards (same notes, new scheduling) and its own options group.
+ * Originals stay in their decks untouched; nothing is inherited or returned.
  * @returns {Promise<{ ok: boolean, msg: string }>}
  */
 async function createFilteredDeck(query, name) {
@@ -956,15 +955,11 @@ async function createFilteredDeck(query, name) {
     return { ok: false, msg: `A deck named "${name}" already exists.` };
   }
   const ctx = searchContext(state.col);
-  const sched = new Scheduler(state.col, { fuzz: true });
-  const fd = state.col.createFilteredDeck(name);
-  const count = sched.buildFiltered(fd.id, (c) => pred(c, ctx));
-  if (!count) {
-    delete state.col.decks[String(fd.id)];
-    return { ok: false, msg: "No cards match this filter." };
-  }
+  const matches = [...state.col.cards.values()].filter((c) => pred(c, ctx));
+  if (!matches.length) return { ok: false, msg: "No cards match this filter." };
+  const { count } = state.col.cloneCardsIntoNewDeck(name, matches);
   await persistAll();
-  return { ok: true, msg: `Created "${name}" — ${count} cards.` };
+  return { ok: true, msg: `Created "${name}" — ${count} fresh cards.` };
 }
 
 /** Does `term` appear as a whole token (or phrase) inside a query string? */
@@ -1194,7 +1189,8 @@ function renderBrowse() {
         state.browseViewAll ? "Union of all filters — a card in any of:" : "Cards matching the selected filter:"),
       ...sources.map((s) => el("div", { class: "pop-filter" },
         el("b", {}, s.label), " ", el("code", {}, s.q || "(empty — matches every card)"))),
-      el("div", { class: "muted" }, `${count} matching card${count === 1 ? "" : "s"} right now (membership is frozen at creation)`),
+      el("div", { class: "muted" },
+        `${count} matching card${count === 1 ? "" : "s"} — copied in as fresh cards with their own deck settings; the originals stay where they are.`),
       nameInput,
       err,
       el("div", { class: "row" },

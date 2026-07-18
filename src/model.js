@@ -429,6 +429,32 @@ export class Collection {
     return d;
   }
 
+  /**
+   * Create an independent deck containing fresh copies of the given cards
+   * (one per note/template pair): same notes, brand-new scheduling, and its
+   * own options group. The original cards are untouched — decks are their
+   * own thing.
+   * @returns {{ deck: object, count: number }}
+   */
+  cloneCardsIntoNewDeck(name, cards) {
+    const deck = this.addDeck(name);
+    const dcId = this.nextId();
+    this.dconf[String(dcId)] = defaultDeckConfig(dcId, name);
+    deck.conf = dcId;
+    const seen = new Set();
+    let count = 0;
+    for (const c of cards) {
+      const key = `${c.nid}:${c.ord}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const due = this.conf.nextPos ?? 1;
+      this.conf.nextPos = due + 1;
+      this.addCard(new Card({ nid: c.nid, did: deck.id, ord: c.ord, due }));
+      count++;
+    }
+    return { deck, count };
+  }
+
   /** Create a deck (name may contain "::" for subdecks). Returns the deck. */
   addDeck(name) {
     const existing = Object.values(this.decks).find((d) => d.name === name);
