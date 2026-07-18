@@ -1688,20 +1688,17 @@ async function toggleNoteDeck(note, did, on) {
     const existing = new Set(noteCards.filter((c) => c.did === did).map((c) => c.ord));
     for (const ord of cardOrdinalsForNote(model, note)) {
       if (existing.has(ord)) continue;
-      const due = state.col.conf.nextPos ?? 1;
-      state.col.conf.nextPos = due + 1;
-      await putCard(state.db, state.col.addCard(new Card({ nid: note.id, did, ord, due })));
+      // Restores the scheduling this note remembers for the deck, if any.
+      await putCard(state.db, state.col.addNoteCardToDeck(note, did, ord));
     }
     await putMeta(state.db, state.col);
     return true;
   }
   const inDeck = noteCards.filter((c) => c.did === did);
   if (inDeck.length === noteCards.length) return false; // must stay somewhere
-  for (const c of inDeck) {
-    state.col.cards.delete(c.id);
-    state.col.graves.push({ usn: -1, oid: c.id, type: 0 });
-  }
-  await deleteCards(state.db, inDeck.map((c) => c.id));
+  const ids = state.col.removeNoteFromDeck(note.id, did);
+  await deleteCards(state.db, ids);
+  await putNote(state.db, note); // the archived scheduling lives on the note
   await putMeta(state.db, state.col);
   return true;
 }

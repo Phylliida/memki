@@ -287,3 +287,74 @@ test("legacy single-flag encoding still reads correctly", () => {
   assert.deepEqual([...cardFlagSet(card)], [6]);
   assert.ok(cardHasFlag(card, 6));
 });
+
+// --- per-deck scheduling memory on the note ---
+
+test("removing a note from a deck archives scheduling; re-adding restores it", () => {
+  const col = Collection.createDefault();
+  const mid = Object.values(col.models).find((m) => m.name === "Basic").id;
+  const wow = col.addDeck("Wowwow");
+  const note = new Note({ mid, fields: ["Q", "A"] }).normalize();
+  col.addNote(note);
+  const card = col.addCard(new Card({
+    nid: note.id, did: wow.id, ord: 0,
+    type: CardType.Review, queue: CardQueue.Review, due: 321, ivl: 17, factor: 2350, reps: 8, lapses: 2,
+  }));
+  const originalId = card.id;
+
+  col.removeNoteFromDeck(note.id, wow.id);
+  assert.equal(col.cardsForNote(note.id).length, 0);
+  assert.match(note.data, /Wowwow/); // the note itself carries the metadata
+
+  const restored = col.addNoteCardToDeck(note, wow.id, 0);
+  assert.equal(restored.id, originalId); // revlog history re-links
+  assert.equal(restored.ivl, 17);
+  assert.equal(restored.due, 321);
+  assert.equal(restored.factor, 2350);
+  assert.equal(restored.reps, 8);
+  assert.equal(restored.type, CardType.Review);
+});
+
+test("deck memory survives deleting and recreating a same-named deck", () => {
+  const col = Collection.createDefault();
+  const mid = Object.values(col.models).find((m) => m.name === "Basic").id;
+  const wow = col.addDeck("Wowwow");
+  const note = new Note({ mid, fields: ["Q", "A"] }).normalize();
+  col.addNote(note);
+  // keep the note alive in Default too, so deck deletion doesn't remove it
+  col.addCard(new Card({ nid: note.id, did: 1, ord: 0 }));
+  col.addCard(new Card({ nid: note.id, did: wow.id, ord: 0, type: CardType.Review, queue: CardQueue.Review, due: 99, ivl: 42, factor: 2500 }));
+
+  col.removeDeck(wow.id); // archives on the note
+  assert.equal(col.cardsForNote(note.id).length, 1);
+
+  const wow2 = col.addDeck("Wowwow"); // brand-new deck, same name
+  const back = col.addNoteCardToDeck(note, wow2.id, 0);
+  assert.equal(back.ivl, 42);
+  assert.equal(back.due, 99);
+});
+
+test("renaming a deck carries the notes' archived scheduling keys", () => {
+  const col = Collection.createDefault();
+  const mid = Object.values(col.models).find((m) => m.name === "Basic").id;
+  const wow = col.addDeck("Wowwow");
+  const note = new Note({ mid, fields: ["Q", "A"] }).normalize();
+  col.addNote(note);
+  col.addCard(new Card({ nid: note.id, did: 1, ord: 0 }));
+  col.addCard(new Card({ nid: note.id, did: wow.id, ord: 0, ivl: 7, type: CardType.Review, queue: CardQueue.Review, due: 5, factor: 2500 }));
+  col.removeNoteFromDeck(note.id, wow.id);
+
+  col.renameDeck(wow.id, "Zowzow");
+  const back = col.addNoteCardToDeck(note, wow.id, 0); // deck now named Zowzow
+  assert.equal(back.ivl, 7); // memory followed the rename
+});
+
+test("without memory, adding to a deck creates a fresh card", () => {
+  const col = Collection.createDefault();
+  const mid = Object.values(col.models).find((m) => m.name === "Basic").id;
+  const note = new Note({ mid, fields: ["Q", "A"] }).normalize();
+  col.addNote(note);
+  const fresh = col.addNoteCardToDeck(note, 1, 0);
+  assert.equal(fresh.type, CardType.New);
+  assert.equal(fresh.reps, 0);
+});

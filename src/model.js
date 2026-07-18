@@ -452,6 +452,75 @@ export class Collection {
     return [...this.cards.values()].filter((c) => c.nid === noteId);
   }
 
+  // --- per-deck scheduling memory (stored on the note, never discarded) ---
+  //
+  // The note is the durable home of scheduling state: note.data holds a
+  // "sched" map keyed by `deckName \x1f ord` with the card's scheduling
+  // columns (and its id, so review history re-links). Removing a note from a
+  // deck archives there; re-adding restores it. Keyed by deck NAME so the
+  // memory survives even deleting and recreating a deck.
+
+  _noteData(note) {
+    try {
+      const o = JSON.parse(note.data || "{}");
+      return o && typeof o === "object" ? o : {};
+    } catch {
+      return {};
+    }
+  }
+
+  _deckKey(did, ord) {
+    return `${this.decks[String(did)]?.name ?? String(did)}\x1f${ord}`;
+  }
+
+  /** Snapshot a card's scheduling onto its note, keyed by deck name + ord. */
+  _archiveCardState(note, card) {
+    const d = this._noteData(note);
+    d.sched ??= {};
+    d.sched[this._deckKey(card.did, card.ord)] = {
+      id: card.id, type: card.type, queue: card.queue, due: card.due,
+      ivl: card.ivl, factor: card.factor, reps: card.reps, lapses: card.lapses,
+      left: card.left, data: card.data,
+    };
+    note.data = JSON.stringify(d);
+  }
+
+  /**
+   * Remove a note's cards from a deck, archiving their scheduling on the
+   * note first (the metadata never goes away). Returns the deleted card ids.
+   */
+  removeNoteFromDeck(noteId, did) {
+    const note = this.notes.get(noteId);
+    const cards = this.cardsForNote(noteId).filter((c) => c.did === did);
+    for (const c of cards) {
+      if (note) this._archiveCardState(note, c);
+      this.cards.delete(c.id);
+      this.graves.push({ usn: -1, oid: c.id, type: 0 });
+    }
+    return cards.map((c) => c.id);
+  }
+
+  /**
+   * Materialize a note's card for (deck, ord): restores the scheduling the
+   * note remembers for that deck if it has any (including the old card id,
+   * so revlog history reattaches), else creates a fresh new card.
+   */
+  addNoteCardToDeck(note, did, ord) {
+    const snap = this._noteData(note).sched?.[this._deckKey(did, ord)];
+    if (snap) {
+      const props = {
+        nid: note.id, did, ord, type: snap.type, queue: snap.queue, due: snap.due,
+        ivl: snap.ivl, factor: snap.factor, reps: snap.reps, lapses: snap.lapses,
+        left: snap.left, data: snap.data ?? "",
+      };
+      if (snap.id != null && !this.cards.has(snap.id)) props.id = snap.id;
+      return this.addCard(new Card(props));
+    }
+    const due = this.conf.nextPos ?? 1;
+    this.conf.nextPos = due + 1;
+    return this.addCard(new Card({ nid: note.id, did, ord, due }));
+  }
+
   /** Create a filtered (dynamic) deck. Returns the deck. */
   createFilteredDeck(name) {
     const id = this.nextId();
@@ -479,9 +548,11 @@ export class Collection {
       const key = `${c.nid}:${c.ord}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      const due = this.conf.nextPos ?? 1;
-      this.conf.nextPos = due + 1;
-      this.addCard(new Card({ nid: c.nid, did: deck.id, ord: c.ord, due }));
+      const note = this.notes.get(c.nid);
+      if (!note) continue;
+      // Fresh cards — unless the note remembers scheduling for a previous
+      // deck of this same name, which is restored.
+      this.addNoteCardToDeck(note, deck.id, c.ord);
       count++;
     }
     return { deck, count };
@@ -501,9 +572,32 @@ export class Collection {
     const deck = this.decks[String(id)];
     if (!deck) return;
     const prefix = `${deck.name}::`;
+    const renames = [];
     for (const d of Object.values(this.decks)) {
-      if (d.id === id) d.name = newName;
-      else if (d.name.startsWith(prefix)) d.name = newName + "::" + d.name.slice(prefix.length);
+      if (d.id === id) {
+        renames.push([d.name, newName]);
+        d.name = newName;
+      } else if (d.name.startsWith(prefix)) {
+        const nn = newName + "::" + d.name.slice(prefix.length);
+        renames.push([d.name, nn]);
+        d.name = nn;
+      }
+    }
+    // The notes' per-deck scheduling memory is keyed by deck name — carry it.
+    for (const note of this.notes.values()) {
+      const d = this._noteData(note);
+      if (!d.sched) continue;
+      let changed = false;
+      for (const [oldN, newN] of renames) {
+        for (const key of Object.keys(d.sched)) {
+          if (key.startsWith(`${oldN}\x1f`)) {
+            d.sched[newN + key.slice(oldN.length)] = d.sched[key];
+            delete d.sched[key];
+            changed = true;
+          }
+        }
+      }
+      if (changed) note.data = JSON.stringify(d);
     }
   }
 
@@ -522,6 +616,10 @@ export class Collection {
     for (const c of [...this.cards.values()]) {
       if (ids.has(c.did)) {
         affectedNotes.add(c.nid);
+        // Archive scheduling on the note — recreating a same-named deck and
+        // re-adding the note restores it.
+        const note = this.notes.get(c.nid);
+        if (note) this._archiveCardState(note, c);
         this.cards.delete(c.id);
         this.graves.push({ usn: -1, oid: c.id, type: 0 });
       }
