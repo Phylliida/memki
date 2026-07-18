@@ -32,6 +32,38 @@ export const RevlogType = Object.freeze({
 /** models[*].type */
 export const NoteTypeKind = Object.freeze({ Standard: 0, Cloze: 1 });
 
+// --- card flags (non-exclusive) ---
+//
+// Anki stores a single flag number in the low 3 bits of cards.flags. We allow
+// multiple flags at once: bits 3–9 hold a bitmask (bit n+2 = flag n), and the
+// low 3 bits mirror the lowest active flag so exports stay Anki-readable.
+
+/** The set of active flags on a card (numbers 1–7). */
+export function cardFlagSet(card) {
+  const mask = (card.flags >> 3) & 0x7f;
+  if (mask) {
+    const s = new Set();
+    for (let n = 1; n <= 7; n++) if (mask & (1 << (n - 1))) s.add(n);
+    return s;
+  }
+  const low = card.flags & 7; // legacy single-flag encoding
+  return low ? new Set([low]) : new Set();
+}
+
+/** Write a set of flags (1–7) back into card.flags. */
+export function writeCardFlags(card, set) {
+  let mask = 0;
+  for (const n of set) if (n >= 1 && n <= 7) mask |= 1 << (n - 1);
+  const lowest = mask ? Math.min(...set) : 0;
+  card.flags = (card.flags & ~0x3ff) | (mask << 3) | lowest;
+}
+
+/** Does the card carry flag n? (n = 0 means: no flags at all.) */
+export function cardHasFlag(card, n) {
+  const s = cardFlagSet(card);
+  return n === 0 ? s.size === 0 : s.has(n);
+}
+
 // --- tags <-> string ---
 
 /** Anki stores tags space-joined with a leading and trailing space (or ""). */

@@ -263,3 +263,27 @@ test("cloneCardsIntoNewDeck: independent deck, fresh cards, own options", () => 
   assert.notEqual(String(deck.conf), "1");
   assert.equal(col.dconf[String(deck.conf)].name, "Bees Redux");
 });
+
+// --- non-exclusive flags ---
+
+import { cardFlagSet, writeCardFlags, cardHasFlag } from "../src/model.js";
+
+test("multiple flags coexist; low bits mirror the lowest for Anki compat", () => {
+  const card = new Card({ nid: 1, did: 1 });
+  writeCardFlags(card, new Set([1, 3])); // red + green
+  assert.deepEqual([...cardFlagSet(card)].sort(), [1, 3]);
+  assert.equal(card.flags & 7, 1); // Anki sees red
+  assert.ok(cardHasFlag(card, 1) && cardHasFlag(card, 3));
+  assert.ok(!cardHasFlag(card, 2) && !cardHasFlag(card, 0));
+
+  writeCardFlags(card, new Set()); // clear all
+  assert.equal(cardFlagSet(card).size, 0);
+  assert.ok(cardHasFlag(card, 0));
+  assert.equal(card.flags & 0x3ff, 0);
+});
+
+test("legacy single-flag encoding still reads correctly", () => {
+  const card = new Card({ nid: 1, did: 1, flags: 6 }); // old-style turquoise
+  assert.deepEqual([...cardFlagSet(card)], [6]);
+  assert.ok(cardHasFlag(card, 6));
+});

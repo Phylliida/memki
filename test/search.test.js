@@ -85,7 +85,7 @@ test("empty query matches everything; parens group OR under AND", () => {
 
 // --- extended syntax (audit additions) ---
 
-import { Revlog } from "../src/model.js";
+import { Revlog, writeCardFlags } from "../src/model.js";
 
 function build2() {
   const col = Collection.createDefault();
@@ -190,4 +190,15 @@ test("flag: accepts color names as well as numbers", () => {
   assert.equal(searchCards(col, "flag:none").length, 1);
   assert.equal(searchCards(col, "flag:1").length, 1); // numbers still work
   assert.equal(searchCards(col, "flag:mauve").length, 0);
+});
+
+test("flag search matches any of a card's multiple flags", () => {
+  const { col, mk } = build2();
+  const c = mk();
+  writeCardFlags(c, new Set([1, 3])); // red + green
+  mk(); // unflagged
+  assert.equal(searchCards(col, "flag:red").length, 1);
+  assert.equal(searchCards(col, "flag:green").length, 1);
+  assert.equal(searchCards(col, "flag:blue").length, 0);
+  assert.equal(searchCards(col, "flag:none").length, 1);
 });

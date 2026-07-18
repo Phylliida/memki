@@ -21,7 +21,7 @@
 // Pure module: compileSearch(query) -> (card, ctx) => bool, and searchCards()
 // which builds the ctx from a collection.
 
-import { CardType, CardQueue, parseCardData } from "./model.js";
+import { CardType, CardQueue, parseCardData, cardHasFlag } from "./model.js";
 import { collectionTiming } from "./timing.js";
 
 const lc = (x) => (x ?? "").toLowerCase();
@@ -224,7 +224,8 @@ function termPredicate(s) {
       case "flag": {
         const FLAG_COLORS = { none: 0, red: 1, orange: 2, green: 3, blue: 4, pink: 5, turquoise: 6, turquise: 6, purple: 7 };
         const n = lc(val) in FLAG_COLORS ? FLAG_COLORS[lc(val)] : Number(val);
-        return Number.isFinite(n) ? (card) => (card.flags & 7) === n : () => false;
+        // Flags are non-exclusive: flag:red matches any card carrying red.
+        return Number.isFinite(n) ? (card) => cardHasFlag(card, n) : () => false;
       }
       default: return fieldPred(key, val); // unknown key → treat as a field name (Anki)
     }

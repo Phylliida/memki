@@ -116,6 +116,13 @@ export async function deleteRevlog(db, id) {
   await txDone(tx);
 }
 
+/** Delete cards from storage (the note stays). */
+export async function deleteCards(db, cardIds) {
+  const tx = db.transaction("cards", "readwrite");
+  for (const id of cardIds) tx.objectStore("cards").delete(id);
+  await txDone(tx);
+}
+
 /** Delete a note and its cards from storage. */
 export async function deleteNoteAndCards(db, noteId, cardIds) {
   const tx = db.transaction(["notes", "cards"], "readwrite");

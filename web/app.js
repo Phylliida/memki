@@ -5,6 +5,7 @@
 import {
   Collection, Note, Card, NoteTypeKind, CardType, CardQueue, imageOcclusionNoteType,
   basicNoteType, basicReversedNoteType, basicOptionalReversedNoteType, basicTypeNoteType, clozeNoteType,
+  cardFlagSet,
 } from "../src/model.js";
 import { Scheduler } from "../src/scheduler.js";
 import { renderCard, cardOrdinalsForNote } from "../src/template.js";
@@ -15,7 +16,7 @@ import { Rating } from "../src/fsrs.js";
 import { stripHtml, stripHtmlPreservingMediaFilenames } from "../src/text.js";
 import {
   openCollectionDB, loadCollection, saveCollection,
-  putCard, putNote, putRevlog, putMeta, saveMedia, loadMedia, clearAll, deleteNoteAndCards, deleteRevlog,
+  putCard, putNote, putRevlog, putMeta, saveMedia, loadMedia, clearAll, deleteCards, deleteNoteAndCards, deleteRevlog,
 } from "../src/storage.js";
 
 const SQL_CDN = "https://cdn.jsdelivr.net/npm/sql.js@1.14.1/dist/";
@@ -1223,12 +1224,12 @@ function renderBrowse() {
       ...shown.map((card) => {
         const note = state.col.notes.get(card.nid);
         const title = stripHtml(note.fields[0] ?? "").slice(0, 80) || "(empty)";
-        const flag = card.flags & 7;
+        const flags = [...cardFlagSet(card)].sort();
         return el("div", {
           class: `browse-row${note.id === selectedNoteId ? " selected" : ""}`,
           onclick: () => (isDesktop() ? openInPane(note.id) : renderEditNote(note.id)),
         },
-          flag ? el("span", { class: `flag-dot f${flag}`, title: FLAG_NAMES[flag] }, icon("flag")) : "",
+          ...flags.map((n) => el("span", { class: `flag-dot f${n}`, title: FLAG_NAMES[n] }, icon("flag"))),
           el("span", { class: "br-title" }, title),
           el("span", { class: "br-deck" }, deckName(card.did)),
           el("span", { class: `br-state ${cardStateLabel(card)}` }, cardStateLabel(card)),
@@ -1624,18 +1625,49 @@ async function applyToNoteCards(note, fn, { meta = false } = {}) {
 const FLAG_NAMES = ["No flag", "Red", "Orange", "Green", "Blue", "Pink", "Turquoise", "Purple"];
 
 /**
- * Seven flag bubbles; the current one is filled. Clicking sets immediately;
- * clicking the active one clears the flag (a card has at most one flag).
+ * Seven independent flag bubbles (flags are not exclusive — a card can carry
+ * red and green at once). Clicking toggles that flag immediately.
  */
-function flagPicker(current, onPick) {
+function flagPicker(flagSet, onToggle) {
   return el("span", { class: "flag-picker" },
     ...[1, 2, 3, 4, 5, 6, 7].map((n) =>
       el("button", {
         type: "button",
-        class: `flag-bub f${n}${n === current ? " on" : ""}`,
-        title: n === current ? `${FLAG_NAMES[n]} (click to clear)` : FLAG_NAMES[n],
-        onclick: () => onPick(n === current ? 0 : n),
+        class: `flag-bub f${n}${flagSet.has(n) ? " on" : ""}`,
+        title: flagSet.has(n) ? `${FLAG_NAMES[n]} (on)` : FLAG_NAMES[n],
+        onclick: () => onToggle(n),
       }, icon("flag"))));
+}
+
+/**
+ * Toggle a note's membership in a deck: on adds fresh cards for the note
+ * there (one per template/cloze), off deletes the note's cards from it.
+ * A note always stays in at least one deck.
+ * @returns {Promise<boolean>} false if the toggle was refused
+ */
+async function toggleNoteDeck(note, did, on) {
+  const noteCards = state.col.cardsForNote(note.id);
+  if (on) {
+    const model = state.col.noteType(note.mid);
+    const existing = new Set(noteCards.filter((c) => c.did === did).map((c) => c.ord));
+    for (const ord of cardOrdinalsForNote(model, note)) {
+      if (existing.has(ord)) continue;
+      const due = state.col.conf.nextPos ?? 1;
+      state.col.conf.nextPos = due + 1;
+      await putCard(state.db, state.col.addCard(new Card({ nid: note.id, did, ord, due })));
+    }
+    await putMeta(state.db, state.col);
+    return true;
+  }
+  const inDeck = noteCards.filter((c) => c.did === did);
+  if (inDeck.length === noteCards.length) return false; // must stay somewhere
+  for (const c of inDeck) {
+    state.col.cards.delete(c.id);
+    state.col.graves.push({ usn: -1, oid: c.id, type: 0 });
+  }
+  await deleteCards(state.db, inDeck.map((c) => c.id));
+  await putMeta(state.db, state.col);
+  return true;
 }
 
 /** A row of note-level operations (applied to all the note's cards). */
@@ -1643,17 +1675,45 @@ function noteActions(note, onDone) {
   const cards = state.col.cardsForNote(note.id);
   const anySusp = cards.some((c) => c.queue === CardQueue.Suspended);
   const decks = Object.values(state.col.decks).filter((d) => !d.dyn);
-  const moveSel = el("select", {}, ...decks.map((d) => el("option", { value: d.id }, d.name)));
-  moveSel.value = String(cards[0]?.did ?? 1);
   const act = async (fn, meta) => { await applyToNoteCards(note, fn, { meta }); onDone(); };
+
+  // Deck membership popup: toggle which decks this note's cards live in.
+  const deckPop = el("div", { class: "pop-panel deck-pop" });
+  deckPop.style.display = "none";
+  const buildDeckPop = () => {
+    const inDecks = new Set(state.col.cardsForNote(note.id).map((c) => c.did));
+    deckPop.replaceChildren(
+      el("h3", {}, "Decks"),
+      el("div", { class: "muted pop-src" },
+        "This note lives in the toggled decks. On adds fresh cards there; off removes that deck's copies. Scheduling is per-deck."),
+      el("div", { class: "tag-bubbles" },
+        ...decks.map((d) =>
+          el("button", {
+            type: "button", class: `tag-bub${inDecks.has(d.id) ? " on" : ""}`,
+            onclick: async () => {
+              const ok = await toggleNoteDeck(note, d.id, !inDecks.has(d.id));
+              if (!ok) setStatus("A note must stay in at least one deck.");
+              buildDeckPop();
+            },
+          }, d.name))),
+      el("div", { class: "row" },
+        el("button", { type: "button", onclick: () => { deckPop.style.display = "none"; onDone(); } }, "Close")),
+    );
+  };
 
   return el("div", { class: "note-actions" },
     el("button", { onclick: () => act((s, c) => (anySusp ? s.unsuspend(c) : s.suspend(c))) }, anySusp ? "Unsuspend" : "Suspend"),
     el("button", { onclick: () => act((s, c) => s.buryCard(c)) }, "Bury"),
     el("button", { onclick: () => { if (confirm("Reset these cards to new?")) act((s, c) => s.forget(c), true); } }, "Forget"),
     el("button", { onclick: () => { const d = Number(prompt("Due in how many days?", "1")); if (Number.isFinite(d)) act((s, c) => s.setDueDate(c, d)); } }, "Set Due"),
-    el("span", { class: "na-group" }, "Flag", flagPicker((cards[0]?.flags ?? 0) & 7, (n) => act((s, c) => s.setFlag(c, n)))),
-    el("span", { class: "na-group" }, "Move", moveSel, el("button", { onclick: () => act((s, c) => s.moveCard(c, Number(moveSel.value))) }, "Go")),
+    el("span", { class: "na-group" }, "Flag", flagPicker(cardFlagSet(cards[0] ?? { flags: 0 }), (n) => act((s, c) => s.toggleFlag(c, n)))),
+    el("span", { class: "na-group pop-anchor" },
+      el("button", { onclick: () => {
+        if (deckPop.style.display === "none") { buildDeckPop(); deckPop.style.display = ""; }
+        else { deckPop.style.display = "none"; onDone(); }
+      } }, "Decks"),
+      deckPop,
+    ),
   );
 }
 
@@ -1674,7 +1734,7 @@ function reviewMoreBar() {
     el("button", { class: "icon", onclick: () => act((s, c) => s.suspend(c)) }, "Suspend"),
     el("button", { class: "icon", onclick: () => { if (confirm("Reset to new?")) act((s, c) => s.forget(c), true); } }, "Forget"),
     el("button", { class: "icon", onclick: () => { const d = Number(prompt("Due in days?", "1")); if (Number.isFinite(d)) act((s, c) => s.setDueDate(c, d)); } }, "Set Due"),
-    flagPicker(card.flags & 7, (n) => act((s, c) => s.setFlag(c, n))),
+    flagPicker(cardFlagSet(card), (n) => act((s, c) => s.toggleFlag(c, n))),
   );
 }
 

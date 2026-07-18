@@ -19,7 +19,7 @@
 // learning before reviews rather than mixed), auto-advance, and the a*1000
 // "reps left today" component of `left` are not yet implemented.
 
-import { CardType, CardQueue, RevlogType, Revlog } from "./model.js";
+import { CardType, CardQueue, RevlogType, Revlog, cardFlagSet, writeCardFlags } from "./model.js";
 import { FSRS, DEFAULT_PARAMETERS } from "./fsrs.js";
 import { nowMs, nowSec } from "./ids.js";
 import { collectionTiming } from "./timing.js";
@@ -684,6 +684,13 @@ export class Scheduler {
   }
   buryCard(card) { card.queue = CardQueue.UserBuried; this._touch(card); }
   setFlag(card, n) { card.flags = (card.flags & ~7) | (n & 7); this._touch(card); }
+  /** Toggle one of the (non-exclusive) flags 1–7 on a card. */
+  toggleFlag(card, n) {
+    const s = cardFlagSet(card);
+    if (s.has(n)) s.delete(n); else s.add(n);
+    writeCardFlags(card, s);
+    this._touch(card);
+  }
 
   /** Reset a card to "new" (forget), giving it a fresh position. */
   forget(card) {
