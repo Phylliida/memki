@@ -1400,16 +1400,20 @@ function noteEditorForm(noteId, cb = {}) {
     if (saveTimer) { clearTimeout(saveTimer); doSave(); }
   });
 
+  const refresh = () => (cb.onCardsChanged ?? cb.onAutoSaved ?? (() => {}))();
+  const noteCards = state.col.cardsForNote(noteId);
   return el("div", { class: "form note-editor" },
     el("div", { class: "muted ne-head" },
       `${model.name} · ${cardCount} card${cardCount === 1 ? "" : "s"} share this note · edits save automatically`),
     fieldsBox,
     el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Tags"), tagBox),
-    el("div", { class: "row" },
+    el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Flags"),
+      flagPicker(cardFlagSet(noteCards[0] ?? { flags: 0 }),
+        async (n) => { await applyToNoteCards(note, (s, c) => s.toggleFlag(c, n)); refresh(); })),
+    el("div", { class: "row ne-bottom" },
+      el("button", { onclick: () => openDeckModalForNote(note, refresh) }, "Decks"),
       el("button", { class: "danger", onclick: del }, "Delete"),
     ),
-    el("h3", {}, "Card actions"),
-    noteActions(note, () => (cb.onCardsChanged ?? cb.onAutoSaved ?? (() => {}))()),
   );
 }
 
@@ -1703,46 +1707,30 @@ async function toggleNoteDeck(note, did, on) {
   return true;
 }
 
-/** A row of note-level operations (applied to all the note's cards). */
-function noteActions(note, onDone) {
-  const cards = state.col.cardsForNote(note.id);
-  const anySusp = cards.some((c) => c.queue === CardQueue.Suspended);
+/** Centered modal toggling which decks a note's cards live in. */
+function openDeckModalForNote(note, onDone) {
   const decks = Object.values(state.col.decks).filter((d) => !d.dyn);
-  const act = async (fn, meta) => { await applyToNoteCards(note, fn, { meta }); onDone(); };
-
-  // Deck membership: a centered modal with a toggle per deck.
-  const openDeckModal = () => {
-    const bubbles = el("div", { class: "tag-bubbles" });
-    const rebuild = () => {
-      const inDecks = new Set(state.col.cardsForNote(note.id).map((c) => c.did));
-      bubbles.replaceChildren(...decks.map((d) =>
-        el("button", {
-          type: "button", class: `tag-bub${inDecks.has(d.id) ? " on" : ""}`,
-          onclick: async () => {
-            const ok = await toggleNoteDeck(note, d.id, !inDecks.has(d.id));
-            if (!ok) setStatus("A note must stay in at least one deck.");
-            rebuild();
-          },
-        }, d.name)));
-    };
-    rebuild();
-    const { close } = openModal([
-      el("h3", {}, "Decks"),
-      el("div", { class: "muted pop-src" },
-        "This note lives in the toggled decks. On adds fresh cards there; off removes that deck's copies. Scheduling is per-deck."),
-      bubbles,
-      el("div", { class: "row" }, el("button", { type: "button", onclick: () => close() }, "Close")),
-    ], { onClose: onDone });
+  const bubbles = el("div", { class: "tag-bubbles" });
+  const rebuild = () => {
+    const inDecks = new Set(state.col.cardsForNote(note.id).map((c) => c.did));
+    bubbles.replaceChildren(...decks.map((d) =>
+      el("button", {
+        type: "button", class: `tag-bub${inDecks.has(d.id) ? " on" : ""}`,
+        onclick: async () => {
+          const ok = await toggleNoteDeck(note, d.id, !inDecks.has(d.id));
+          if (!ok) setStatus("A note must stay in at least one deck.");
+          rebuild();
+        },
+      }, d.name)));
   };
-
-  return el("div", { class: "note-actions" },
-    el("button", { onclick: () => act((s, c) => (anySusp ? s.unsuspend(c) : s.suspend(c))) }, anySusp ? "Unsuspend" : "Suspend"),
-    el("button", { onclick: () => act((s, c) => s.buryCard(c)) }, "Bury"),
-    el("button", { onclick: () => { if (confirm("Reset these cards to new?")) act((s, c) => s.forget(c), true); } }, "Forget"),
-    el("button", { onclick: () => { const d = Number(prompt("Due in how many days?", "1")); if (Number.isFinite(d)) act((s, c) => s.setDueDate(c, d)); } }, "Set Due"),
-    el("span", { class: "na-group" }, "Flag", flagPicker(cardFlagSet(cards[0] ?? { flags: 0 }), (n) => act((s, c) => s.toggleFlag(c, n)))),
-    el("button", { onclick: openDeckModal }, "Decks"),
-  );
+  rebuild();
+  const { close } = openModal([
+    el("h3", {}, "Decks"),
+    el("div", { class: "muted pop-src" },
+      "This note lives in the toggled decks. Each deck schedules its copies independently, and the note remembers its scheduling per deck — toggling off and back on restores it."),
+    bubbles,
+    el("div", { class: "row" }, el("button", { type: "button", onclick: () => close() }, "Close")),
+  ], { onClose: onDone });
 }
 
 /** A compact operations bar for the current card during review. */
