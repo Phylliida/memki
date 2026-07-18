@@ -158,6 +158,19 @@ code#typeans { display: inline-block; padding: 6px 10px; border-radius: 6px; bac
 /* cloze */
 .card .cloze-inactive { color: inherit; }
 a.hint { display: inline-block; color: var(--accent); }
+
+/* Anki's seven flags */
+.flag-dot { margin-right: 6px; }
+.flag-dot.f1 { color: #ff6b6b; }
+.flag-dot.f2 { color: #ffa94d; }
+.flag-dot.f3 { color: #8ce99a; }
+.flag-dot.f4 { color: #74c0fc; }
+.flag-dot.f5 { color: #f783ac; }
+.flag-dot.f6 { color: #3bc9db; }
+.flag-dot.f7 { color: #b197fc; }
+.more-bar .flag-sel { max-width: 130px; }
+.ab-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.stock-row { align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted, #999); }
 .rich-raw { width: 100%; min-height: 80px; border: none; border-radius: 0; }
 .io-preview { font-size: 12px; margin-top: 8px; word-break: break-word; }
 

@@ -72,6 +72,31 @@ export function retention(col) {
   return total ? passed / total : null;
 }
 
+/** Answer-button counts (Again/Hard/Good/Easy) over all real reviews. */
+export function answerButtons(col) {
+  const out = [0, 0, 0, 0]; // index = ease - 1
+  for (const r of col.revlog) {
+    if (r.ease >= 1 && r.ease <= 4 && r.type !== RevlogType.Manual && r.type !== RevlogType.Rescheduled) {
+      out[r.ease - 1]++;
+    }
+  }
+  return { again: out[0], hard: out[1], good: out[2], easy: out[3] };
+}
+
+/**
+ * Review-interval distribution in week-wide buckets (index 0 = under a week).
+ * The final bucket collects everything >= `weeks` weeks.
+ * @returns {number[]} length `weeks`
+ */
+export function intervalHistogram(col, weeks = 26) {
+  const out = new Array(weeks).fill(0);
+  for (const card of col.cards.values()) {
+    if (card.type !== CardType.Review) continue;
+    out[Math.min(Math.floor(card.ivl / 7), weeks - 1)]++;
+  }
+  return out;
+}
+
 /** Everything the stats view needs, in one call. */
 export function collectionStats(col, today, days = 30) {
   return {
@@ -80,5 +105,7 @@ export function collectionStats(col, today, days = 30) {
     retention: retention(col),
     reviewsPerDay: reviewsPerDay(col, today, days),
     dueForecast: dueForecast(col, today, days),
+    answerButtons: answerButtons(col),
+    intervalHistogram: intervalHistogram(col),
   };
 }

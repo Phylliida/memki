@@ -113,3 +113,20 @@ test("answer duration is recorded in the revlog (capped at 60s)", () => {
   const e2 = sched.answerCard(card2, Rating.Good, { takenMs: 999999 });
   assert.equal(e2.time, 60000);
 });
+
+test("review limit blocks new cards unless the preset ignores it (v3)", () => {
+  const col = collectionWithDeck();
+  col.dconf["1"].rev.perDay = 1;
+  addCard(col, { type: CardType.Review, queue: CardQueue.Review, due: 0, ivl: 5 });
+  for (let i = 0; i < 3; i++) addCard(col, { type: CardType.New, queue: CardQueue.New, due: i });
+
+  // Default: the single review slot is taken; no new cards introduced.
+  let q = new Scheduler(col).queue(1);
+  assert.equal(q.review.length, 1);
+  assert.equal(q.new.length, 0);
+
+  // With the ignore flag, new cards flow up to their own limit.
+  col.dconf["1"].new.ignoreReviewLimit = true;
+  q = new Scheduler(col).queue(1);
+  assert.equal(q.new.length, 3);
+});

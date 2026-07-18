@@ -15,7 +15,7 @@ import { Rating } from "../src/fsrs.js";
 import { stripHtml } from "../src/text.js";
 import {
   openCollectionDB, loadCollection, saveCollection,
-  putCard, putNote, putRevlog, putMeta, saveMedia, loadMedia, deleteNoteAndCards, deleteRevlog,
+  putCard, putNote, putRevlog, putMeta, saveMedia, loadMedia, clearAll, deleteNoteAndCards, deleteRevlog,
 } from "../src/storage.js";
 
 const SQL_CDN = "https://cdn.jsdelivr.net/npm/sql.js@1.14.1/dist/";
@@ -76,15 +76,19 @@ function tbBtn(label, title, onClick) {
 
 /** Store a dropped/pasted file in the media store; returns its media name. */
 async function storeMediaFile(file) {
+  const kind = file.type.startsWith("image/") ? "img" : "snd";
   const extRaw = (file.name?.includes(".") ? file.name.split(".").pop() : file.type.split("/")[1]) || "png";
   const ext = extRaw.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8) || "png";
-  const name = `img-${state.col.nextId()}.${ext}`;
+  const name = `${kind}-${state.col.nextId()}.${ext}`;
   const bytes = new Uint8Array(await file.arrayBuffer());
   state.media.set(name, bytes);
   state.mediaUrls.delete(name);
   await saveMedia(state.db, new Map([[name, bytes]]));
   return name;
 }
+
+const isDroppableMedia = (f) =>
+  f.type.startsWith("image/") || f.type.startsWith("audio/") || f.type.startsWith("video/");
 
 // Fields store media as <img src="filename">. In the editor the image must
 // actually display, so srcs referencing stored media are rewritten to blob URLs
@@ -119,7 +123,7 @@ function placeCaretAt(container, x, y) {
   sel.addRange(range);
 }
 
-const imageFilesOf = (dt) => [...(dt?.files ?? [])].filter((f) => f.type.startsWith("image/"));
+const mediaFilesOf = (dt) => [...(dt?.files ?? [])].filter(isDroppableMedia);
 
 /** A rich-text editor over a field's HTML. Returns { el, getHTML, setHTML, focus }. */
 function richEditor(initialHtml = "") {
@@ -139,7 +143,7 @@ function richEditor(initialHtml = "") {
     return clone.innerHTML;
   };
 
-  const insertImage = async (file) => {
+  const insertMedia = async (file) => {
     if (rawMode) return;
     const name = await storeMediaFile(file);
     area.focus();
@@ -151,8 +155,13 @@ function richEditor(initialHtml = "") {
       sel.removeAllRanges();
       sel.addRange(r);
     }
-    document.execCommand("insertHTML", false,
-      `<img src="${mediaUrl(name)}" data-name="${encodeURIComponent(name)}">`);
+    if (file.type.startsWith("image/")) {
+      document.execCommand("insertHTML", false,
+        `<img src="${mediaUrl(name)}" data-name="${encodeURIComponent(name)}">`);
+    } else {
+      // Audio/video go in as Anki's [sound:...] tag (players render at review).
+      document.execCommand("insertText", false, `[sound:${name}]`);
+    }
   };
 
   const cmd = (c, val = null) => { area.focus(); document.execCommand(c, false, val); };
@@ -186,17 +195,17 @@ function richEditor(initialHtml = "") {
   area.addEventListener("dragleave", () => area.classList.remove("dropping"));
   area.addEventListener("drop", async (e) => {
     area.classList.remove("dropping");
-    const files = imageFilesOf(e.dataTransfer);
+    const files = mediaFilesOf(e.dataTransfer);
     if (!files.length) return;
     e.preventDefault();
     placeCaretAt(area, e.clientX, e.clientY);
-    for (const f of files) await insertImage(f);
+    for (const f of files) await insertMedia(f);
   });
   area.addEventListener("paste", async (e) => {
-    const files = imageFilesOf(e.clipboardData);
+    const files = mediaFilesOf(e.clipboardData);
     if (!files.length) return;
     e.preventDefault();
-    for (const f of files) await insertImage(f);
+    for (const f of files) await insertMedia(f);
   });
 
   const toolbar = el("div", { class: "rich-toolbar" },
@@ -207,9 +216,9 @@ function richEditor(initialHtml = "") {
     tbBtn("1.", "Numbered list", () => cmd("insertOrderedList")),
     tbBtn("T̶", "Clear formatting", () => cmd("removeFormat")),
     tbBtn("[…]", "Cloze (Ctrl+Shift+C)", wrapCloze),
-    tbBtn("🖼", "Insert image (or drag & drop / paste one)", () => {
-      const inp = el("input", { type: "file", accept: "image/*" });
-      inp.addEventListener("change", () => { if (inp.files[0]) insertImage(inp.files[0]); });
+    tbBtn("🖼", "Insert image/audio/video (or drag & drop / paste)", () => {
+      const inp = el("input", { type: "file", accept: "image/*,audio/*,video/*" });
+      inp.addEventListener("change", () => { if (inp.files[0]) insertMedia(inp.files[0]); });
       inp.click();
     }),
     tbBtn("</>", "Edit HTML", toggleRaw),
@@ -273,7 +282,8 @@ function resolveSounds(html) {
 }
 
 /** Best-effort autoplay of the first media player in the current face (Anki-like). */
-function autoplayFirstMedia() {
+function autoplayFirstMedia(card) {
+  if (card && new Scheduler(state.col).deckConfigFor(card).autoplay === false) return;
   const av = view().querySelector("audio, video");
   if (av) av.play().catch(() => {});
 }
@@ -508,7 +518,7 @@ function renderStudy() {
   });
 
   show(back, cardFace(question), showAnswerBtn, reviewMoreBar());
-  autoplayFirstMedia();
+  autoplayFirstMedia(card);
   typesetMath();
   // Focus a type-in-the-answer box if the template has one.
   view().querySelector("#typeans")?.focus();
@@ -543,7 +553,7 @@ function showAnswer() {
     typed, deckName: deckName(card.did), flag: card.flags & 7,
   });
   show(crumbs, cardFace(answer), controls, reviewMoreBar());
-  autoplayFirstMedia();
+  autoplayFirstMedia(card);
   typesetMath();
 }
 
@@ -807,7 +817,9 @@ function renderBrowse(query = "") {
       ...shown.map((card) => {
         const note = state.col.notes.get(card.nid);
         const title = stripHtml(note.fields[0] ?? "").slice(0, 80) || "(empty)";
+        const flag = card.flags & 7;
         return el("div", { class: "browse-row", onclick: () => renderEditNote(note.id) },
+          flag ? el("span", { class: `flag-dot f${flag}`, title: FLAG_NAMES[flag] }, "⚑") : "",
           el("span", { class: "br-title" }, title),
           el("span", { class: "br-deck" }, deckName(card.did)),
           el("span", { class: `br-state ${cardStateLabel(card)}` }, cardStateLabel(card)),
@@ -909,6 +921,8 @@ function renderDeckOptions(deckId) {
   const newBury = check(nu.bury ?? true);
 
   const revPerDay = num(rev.perDay ?? 200);
+  const newIgnoreRev = check(nu.ignoreReviewLimit ?? false);
+  const autoplayChk = check(dc.autoplay ?? true);
   const maxIvl = num(rev.maxIvl ?? 36500);
   const easyBonus = num(rev.ease4 ?? 1.3, "0.05");
   const ivlMod = num(rev.ivlFct ?? 1.0, "0.05");
@@ -926,6 +940,16 @@ function renderDeckOptions(deckId) {
   const retention = num(dc.desiredRetention ?? state.col.conf.desiredRetention ?? 0.9, "0.01");
   const fsrsParams = txt((dc.fsrsParams6 ?? []).join(", "));
 
+  const newOrder = el("select", {}, el("option", { value: 1 }, "Sequential (oldest first)"), el("option", { value: 0 }, "Random"));
+  newOrder.value = String(nu.order ?? 1);
+  const rolloverHour = num(state.col.conf.rollover ?? 4);
+  const newSpreadSel = el("select", {},
+    el("option", { value: 0 }, "Mix with reviews"),
+    el("option", { value: 1 }, "After reviews"),
+    el("option", { value: 2 }, "Before reviews"));
+  newSpreadSel.value = String(state.col.conf.newSpread ?? 0);
+  const learnAhead = num(Math.round((state.col.conf.collapseTime ?? 1200) / 60));
+
   const save = async () => {
     nu.delays = parseSteps(newSteps.value);
     nu.perDay = Number(newPerDay.value) || 0;
@@ -933,6 +957,8 @@ function renderDeckOptions(deckId) {
     nu.initialFactor = Math.round((Number(startEase.value) || 2.5) * 1000);
     nu.bury = newBury.checked;
     rev.perDay = Number(revPerDay.value) || 0;
+    nu.ignoreReviewLimit = newIgnoreRev.checked;
+    dc.autoplay = autoplayChk.checked;
     rev.maxIvl = Number(maxIvl.value) || 36500;
     rev.ease4 = Number(easyBonus.value) || 1.3;
     rev.ivlFct = Number(ivlMod.value) || 1;
@@ -943,6 +969,10 @@ function renderDeckOptions(deckId) {
     lapse.minInt = Number(minInt.value) || 1;
     lapse.mult = (Number(newIvlPct.value) || 0) / 100;
     lapse.leechAction = Number(leechAction.value) || 0;
+    nu.order = Number(newOrder.value) === 0 ? 0 : 1;
+    state.col.conf.rollover = Math.min(Math.max(Math.trunc(Number(rolloverHour.value) || 0), 0), 23);
+    state.col.conf.newSpread = Number(newSpreadSel.value) || 0;
+    state.col.conf.collapseTime = Math.max(0, Math.trunc((Number(learnAhead.value) || 0) * 60));
     state.col.conf.fsrs = fsrsOn.checked;
     const r = Number(retention.value);
     if (Number.isFinite(r)) dc.desiredRetention = Math.min(Math.max(r, 0.7), 0.99);
@@ -964,9 +994,12 @@ function renderDeckOptions(deckId) {
       field("New cards/day", newPerDay),
       el("div", { class: "row" }, field("Graduating interval (days)", gradGood), field("Easy interval (days)", gradEasy)),
       field("Starting ease", startEase),
+      field("Insertion order", newOrder),
       el("label", { class: "inline" }, newBury, "Bury new siblings"),
       el("h3", {}, "Reviews"),
       field("Maximum reviews/day", revPerDay),
+      el("label", { class: "inline" }, newIgnoreRev, "New cards ignore review limit"),
+      el("label", { class: "inline" }, autoplayChk, "Automatically play audio"),
       field("Maximum interval (days)", maxIvl),
       el("div", { class: "row" }, field("Easy bonus", easyBonus), field("Hard interval", hardFactor), field("Interval modifier", ivlMod)),
       el("label", { class: "inline" }, revBury, "Bury review siblings"),
@@ -980,7 +1013,11 @@ function renderDeckOptions(deckId) {
       el("label", { class: "inline" }, fsrsOn, "Enable FSRS (whole collection)"),
       field("Desired retention (0.70–0.99)", retention),
       field("Parameters (17/19/21 numbers, comma-separated; blank = default)", fsrsParams),
-      el("p", { class: "muted" }, "Changes apply to every deck sharing this options group."),
+      el("h3", {}, "Collection preferences"),
+      field("Next day starts at (hour, 0–23)", rolloverHour),
+      field("New/review order", newSpreadSel),
+      field("Learn ahead limit (minutes)", learnAhead),
+      el("p", { class: "muted" }, "Scheduling options apply to every deck sharing this options group; collection preferences apply everywhere."),
       el("div", { class: "row" }, el("button", { onclick: save }, "Save")),
     ),
   );
@@ -996,12 +1033,16 @@ async function applyToNoteCards(note, fn, { meta = false } = {}) {
   if (meta) await putMeta(state.db, state.col);
 }
 
+/** Anki's seven card flags (index = flag number; 0 = none). */
+const FLAG_NAMES = ["No flag", "Red", "Orange", "Green", "Blue", "Pink", "Turquoise", "Purple"];
+const flagOptions = () => FLAG_NAMES.map((l, i) => el("option", { value: i }, i ? `⚑ ${l}` : l));
+
 /** A row of note-level operations (applied to all the note's cards). */
 function noteActions(note, onDone) {
   const cards = state.col.cardsForNote(note.id);
   const anySusp = cards.some((c) => c.queue === CardQueue.Suspended);
   const decks = Object.values(state.col.decks).filter((d) => !d.dyn);
-  const flagSel = el("select", {}, ...["No flag", "Flag 1", "Flag 2", "Flag 3", "Flag 4"].map((l, i) => el("option", { value: i }, l)));
+  const flagSel = el("select", {}, ...flagOptions());
   flagSel.value = String((cards[0]?.flags ?? 0) & 7);
   const moveSel = el("select", {}, ...decks.map((d) => el("option", { value: d.id }, d.name)));
   moveSel.value = String(cards[0]?.did ?? 1);
@@ -1028,12 +1069,16 @@ function reviewMoreBar() {
     if (meta) await putMeta(state.db, state.col);
     renderStudy();
   };
+  const flagSel = el("select", { class: "flag-sel", title: "Flag" }, ...flagOptions());
+  flagSel.value = String(card.flags & 7);
+  flagSel.addEventListener("change", () => act((s, c) => s.setFlag(c, Number(flagSel.value))));
   return el("div", { class: "more-bar" },
     el("button", { class: "icon", onclick: () => renderEditNote(note.id) }, "✎ Edit"),
     el("button", { class: "icon", onclick: () => act((s, c) => s.buryCard(c)) }, "Bury"),
     el("button", { class: "icon", onclick: () => act((s, c) => s.suspend(c)) }, "Suspend"),
     el("button", { class: "icon", onclick: () => { if (confirm("Reset to new?")) act((s, c) => s.forget(c), true); } }, "Forget"),
     el("button", { class: "icon", onclick: () => { const d = Number(prompt("Due in days?", "1")); if (Number.isFinite(d)) act((s, c) => s.setDueDate(c, d)); } }, "Set Due"),
+    flagSel,
   );
 }
 
@@ -1338,6 +1383,16 @@ function renderStats() {
     barChart([...s.reviewsPerDay].reverse(), "var(--good)"), // oldest → today (right)
     el("h3", {}, "Due — next 30 days"),
     barChart(s.dueForecast, "var(--accent)"),
+    el("h3", {}, "Answer buttons"),
+    el("div", { class: "ab-row" },
+      ...Object.entries(s.answerButtons).map(([k, v]) => {
+        const total = Object.values(s.answerButtons).reduce((a, b) => a + b, 0) || 1;
+        return el("div", { class: `stat ${k === "again" ? "suspended" : ""}` },
+          el("div", { class: "stat-n" }, v),
+          el("div", { class: "stat-l" }, `${k} · ${Math.round((v / total) * 100)}%`));
+      })),
+    el("h3", {}, "Review intervals (weeks)"),
+    barChart(s.intervalHistogram, "var(--good)"),
   );
   setStatus("");
 }
@@ -1349,7 +1404,39 @@ async function loadSql() {
   return initSqlJs({ locateFile: (f) => SQL_CDN + f });
 }
 
+async function doBackup() {
+  const { collectionToBackup } = await import("../src/backup.js");
+  const data = JSON.stringify(collectionToBackup(state.col, state.media));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([data], { type: "application/json" }));
+  a.download = `oss-anki-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  setStatus("Backup downloaded.");
+}
+
+async function doRestore(file) {
+  try {
+    const { collectionFromBackup } = await import("../src/backup.js");
+    const { collection, media } = collectionFromBackup(JSON.parse(await file.text()));
+    if (!confirm(`Restore this backup (${collection.cards.size} cards, ${media.size} media files)?\n\nThis REPLACES your current collection.`)) return;
+    sanitizeCurModel(collection);
+    state.col = collection;
+    state.media = media;
+    state.mediaUrls.clear();
+    await clearAll(state.db);
+    await saveCollection(state.db, collection);
+    await saveMedia(state.db, media);
+    setStatus(`Restored ${collection.cards.size} cards.`);
+    renderDecks();
+  } catch (e) {
+    setStatus(`Restore failed: ${e.message}`);
+    console.error(e);
+  }
+}
+
 async function doImport(file) {
+  if (file.name.toLowerCase().endsWith(".json")) return doRestore(file);
   // Always merge into the current collection: imported decks are added as new
   // decks (matched by name), notes dedup/update by GUID. Existing cards'
   // scheduling is never touched.
@@ -1408,6 +1495,7 @@ function wireHeader() {
     fileInput.value = "";
   });
   document.getElementById("btn-export").addEventListener("click", doExport);
+  document.getElementById("btn-backup").addEventListener("click", doBackup);
 }
 
 // Anki-style shortcuts: space/Enter flips; 1–4 (and space/Enter) grade.

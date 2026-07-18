@@ -597,10 +597,23 @@ export class Scheduler {
       return chains.get(did);
     };
     return {
+      // Taking a card requires (and spends) budget along the whole chain.
+      // v3: new cards also consume the review budget unless the deck preset
+      // sets "new cards ignore review limit".
       take: (did, kind) => {
-        const budgets = chainFor(did).map(budgetOf);
-        if (budgets.some((b) => b[kind] <= 0)) return false;
-        for (const b of budgets) b[kind] -= 1;
+        const entries = chainFor(did).map((d) => ({
+          b: budgetOf(d),
+          needRev: kind === "rev" ||
+            !(this.deckConfigFor({ did: d }).new?.ignoreReviewLimit ?? false),
+        }));
+        for (const { b, needRev } of entries) {
+          if (kind === "new" && b.new <= 0) return false;
+          if (needRev && b.rev <= 0) return false;
+        }
+        for (const { b, needRev } of entries) {
+          if (kind === "new") b.new -= 1;
+          if (needRev) b.rev -= 1;
+        }
         return true;
       },
     };
