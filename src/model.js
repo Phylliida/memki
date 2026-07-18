@@ -273,6 +273,33 @@ export function basicNoteType(id, name = "Basic") {
   };
 }
 
+/** "Basic (and reversed card)": Front→Back plus Back→Front. */
+export function basicReversedNoteType(id, name = "Basic (and reversed card)") {
+  const nt = basicNoteType(id, name);
+  nt.tmpls.push(mkTemplate("Card 2", 1, "{{Back}}", "{{FrontSide}}\n\n<hr id=answer>\n\n{{Front}}"));
+  nt.req = [[0, "any", [0]], [1, "any", [1]]];
+  return nt;
+}
+
+/** "Basic (optional reversed card)": the reverse only exists when Add Reverse is set. */
+export function basicOptionalReversedNoteType(id, name = "Basic (optional reversed card)") {
+  const nt = basicNoteType(id, name);
+  nt.flds.push(mkField("Add Reverse", 2));
+  nt.tmpls.push(mkTemplate("Card 2", 1,
+    "{{#Add Reverse}}{{Back}}{{/Add Reverse}}",
+    "{{FrontSide}}\n\n<hr id=answer>\n\n{{Front}}"));
+  nt.req = [[0, "any", [0]], [1, "all", [1, 2]]];
+  return nt;
+}
+
+/** "Basic (type in the answer)". */
+export function basicTypeNoteType(id, name = "Basic (type in the answer)") {
+  const nt = basicNoteType(id, name);
+  nt.tmpls[0].qfmt = "{{Front}}\n\n{{type:Back}}";
+  nt.tmpls[0].afmt = "{{Front}}\n\n<hr id=answer>\n\n{{type:Back}}";
+  return nt;
+}
+
 const CLOZE_CSS = `${DEFAULT_CSS}.cloze {\n font-weight: bold;\n color: blue;\n}\n.nightMode .cloze {\n color: lightblue;\n}\n`;
 
 /** A "Cloze" note type (Text / Back Extra, one cloze template). */
@@ -340,12 +367,24 @@ export class Collection {
     const deck = defaultDeck(1, "Default");
     col.decks["1"] = deck;
     col.dconf["1"] = defaultDeckConfig(1, "Default");
-    const basicId = nowMs();
-    col.models[String(basicId)] = basicNoteType(basicId, "Basic");
-    const clozeId = basicId + 1;
-    col.models[String(clozeId)] = clozeNoteType(clozeId, "Cloze");
-    col.conf.curModel = String(basicId);
+    // The stock note types Anki ships with.
+    let id = nowMs();
+    for (const factory of [basicNoteType, basicReversedNoteType, basicOptionalReversedNoteType, basicTypeNoteType, clozeNoteType]) {
+      const nt = factory(id++);
+      col.models[String(nt.id)] = nt;
+    }
+    col.conf.curModel = String(Object.values(col.models).find((m) => m.name === "Basic").id);
     return col;
+  }
+
+  /** Add one of the stock note types by factory, skipping if the name exists. */
+  addStockNoteType(factory) {
+    const probe = factory(0);
+    const existing = Object.values(this.models).find((m) => m.name === probe.name);
+    if (existing) return existing;
+    const nt = factory(this.nextId());
+    this.models[String(nt.id)] = nt;
+    return nt;
   }
 
   /**

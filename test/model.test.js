@@ -196,7 +196,7 @@ test("Collection.createDefault has Default deck, options, and Basic note type", 
   assert.ok(col.decks["1"] && col.decks["1"].name === "Default");
   assert.ok(col.dconf["1"] && col.dconf["1"].new.initialFactor === 2500);
   const models = Object.values(col.models);
-  assert.deepEqual(models.map((m) => m.name).sort(), ["Basic", "Cloze"]);
+  assert.ok(models.some((m) => m.name === "Basic") && models.some((m) => m.name === "Cloze"));
   const basic = models.find((m) => m.name === "Basic");
   assert.deepEqual(basic.flds.map((f) => f.name), ["Front", "Back"]);
   assert.equal(col.conf.curModel, String(basic.id)); // default is Basic
@@ -208,4 +208,33 @@ test("Collection.createDefault has Default deck, options, and Basic note type", 
   col.addCard(new Card({ nid: note.id, did: 1 }));
   assert.equal(col.notes.size, 1);
   assert.equal(col.cards.size, 1);
+});
+
+// --- stock note types + card generation (audit additions) ---
+
+import { basicOptionalReversedNoteType, basicReversedNoteType } from "../src/model.js";
+import { cardOrdinalsForNote } from "../src/template.js";
+
+test("createDefault ships the five stock note types", () => {
+  const col = Collection.createDefault();
+  const names = Object.values(col.models).map((m) => m.name).sort();
+  assert.deepEqual(names, [
+    "Basic", "Basic (and reversed card)", "Basic (optional reversed card)",
+    "Basic (type in the answer)", "Cloze",
+  ]);
+});
+
+test("optional reverse generates the second card only when Add Reverse is set", () => {
+  const nt = basicOptionalReversedNoteType(1);
+  const plain = new Note({ mid: 1, fields: ["Q", "A", ""] });
+  assert.deepEqual(cardOrdinalsForNote(nt, plain), [0]);
+  const reversed = new Note({ mid: 1, fields: ["Q", "A", "y"] });
+  assert.deepEqual(cardOrdinalsForNote(nt, reversed), [0, 1]);
+});
+
+test("reversed note type generates both cards; empty note generates none", () => {
+  const nt = basicReversedNoteType(2);
+  assert.deepEqual(cardOrdinalsForNote(nt, new Note({ mid: 2, fields: ["Q", "A"] })), [0, 1]);
+  assert.deepEqual(cardOrdinalsForNote(nt, new Note({ mid: 2, fields: ["Q", ""] })), [0]);
+  assert.deepEqual(cardOrdinalsForNote(nt, new Note({ mid: 2, fields: ["", ""] })), []);
 });

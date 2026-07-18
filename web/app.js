@@ -2,9 +2,12 @@
 // Core study/persistence runs fully offline; .apkg import/export lazily loads
 // sql.js + fflate + fzstd from the CDN (see the import map in index.html).
 
-import { Collection, Note, Card, NoteTypeKind, CardType, CardQueue, imageOcclusionNoteType } from "../src/model.js";
+import {
+  Collection, Note, Card, NoteTypeKind, CardType, CardQueue, imageOcclusionNoteType,
+  basicNoteType, basicReversedNoteType, basicOptionalReversedNoteType, basicTypeNoteType, clozeNoteType,
+} from "../src/model.js";
 import { Scheduler } from "../src/scheduler.js";
-import { renderCard, clozeNumbers } from "../src/template.js";
+import { renderCard, cardOrdinalsForNote } from "../src/template.js";
 import { collectionStats } from "../src/stats.js";
 import { compileSearch, searchContext } from "../src/search.js";
 import { parseCsv } from "../src/csv.js";
@@ -609,13 +612,7 @@ async function doUndo() {
 function addNoteWithCards(model, fields, did, tags = []) {
   const note = new Note({ mid: model.id, fields, tags }).normalize(model.sortf ?? 0);
   state.col.addNote(note);
-  let ords;
-  if (model.type === NoteTypeKind.Cloze) {
-    const nums = [...clozeNumbers(fields[0] ?? "")].sort((a, b) => a - b);
-    ords = (nums.length ? nums : [1]).map((n) => n - 1);
-  } else {
-    ords = model.tmpls.map((t) => t.ord);
-  }
+  const ords = cardOrdinalsForNote(model, note);
   const deck = state.col.decks[String(did)];
   const dc = state.col.dconf[String(deck?.conf ?? 1)];
   const randomOrder = (dc?.new?.order ?? 1) === 0; // 0 = random, 1 = sequential
@@ -845,7 +842,20 @@ function renderEditNote(noteId) {
     note.mod = Math.floor(Date.now() / 1000);
     note.normalize(model.sortf ?? 0);
     await putNote(state.db, note);
-    setStatus("Saved.");
+    // Card generation on edit (Anki): create any cards the new field values
+    // now require (e.g. filling "Add Reverse", or a new cloze number).
+    const have = new Set(state.col.cardsForNote(note.id).map((c) => c.ord));
+    const homeDid = state.col.cardsForNote(note.id)[0]?.did ?? 1;
+    let made = 0;
+    for (const ord of cardOrdinalsForNote(model, note)) {
+      if (have.has(ord)) continue;
+      const due = state.col.conf.nextPos ?? 1;
+      state.col.conf.nextPos = due + 1;
+      await putCard(state.db, state.col.addCard(new Card({ nid: note.id, did: homeDid, ord, due })));
+      made++;
+    }
+    if (made) await putMeta(state.db, state.col);
+    setStatus(made ? `Saved (+${made} card${made > 1 ? "s" : ""}).` : "Saved.");
     renderBrowse(state.browseQuery ?? "");
   };
 
@@ -1194,9 +1204,15 @@ function renderNoteTypes() {
     },
   }, "+ New");
 
+  const STOCK = [basicNoteType, basicReversedNoteType, basicOptionalReversedNoteType, basicTypeNoteType, clozeNoteType];
+  const missing = STOCK.filter((f) => !models.some((m) => m.name === f(0).name));
   show(
     el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
     el("div", { class: "decks-head" }, el("h2", {}, "Note Types"), add),
+    missing.length
+      ? el("div", { class: "row stock-row" }, "Add stock type:", ...missing.map((f) =>
+          el("button", { onclick: async () => { state.col.addStockNoteType(f); await persistAll(); renderNoteTypes(); } }, f(0).name)))
+      : "",
     ...models.map((m) => el("div", { class: "browse-row", onclick: () => renderEditNoteType(m.id) },
       el("span", { class: "br-title" }, m.name),
       el("span", { class: "br-deck" },

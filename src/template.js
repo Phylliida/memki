@@ -340,6 +340,29 @@ export function fieldMap(noteType, note) {
 }
 
 /**
+ * The card ordinals a note should have (Anki's card-generation rule).
+ * Cloze: one card per cloze ordinal. Standard: a template generates a card
+ * iff the note's fields affect its rendered question — rendering with the
+ * real fields must differ from rendering with every field blank (so pure
+ * static text, or an unfilled {{#Optional}} section, generates nothing).
+ */
+export function cardOrdinalsForNote(noteType, note) {
+  if (noteType.type === NoteTypeKind.Cloze) {
+    const nums = [...clozeNumbers(note.fields[0] ?? "")].sort((a, b) => a - b);
+    return (nums.length ? nums : [1]).map((n) => n - 1);
+  }
+  const fields = fieldMap(noteType, note);
+  const blank = Object.fromEntries(Object.keys(fields).map((k) => [k, ""]));
+  const ords = [];
+  for (const t of noteType.tmpls) {
+    if (renderTemplate(t.qfmt, { fields, side: "q" }) !== renderTemplate(t.qfmt, { fields: blank, side: "q" })) {
+      ords.push(t.ord);
+    }
+  }
+  return ords;
+}
+
+/**
  * Render a card's question and answer HTML.
  * @param {object} noteType  a model from collection.models
  * @param {number} ord       template ordinal (card.ord)
