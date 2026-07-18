@@ -1002,9 +1002,10 @@ function renderBrowse() {
   const activeTab = () => tabs[state.browseActive];
 
   const unionQuery = () => {
-    const parts = tabs.map((t) => t.q.trim()).filter(Boolean);
-    if (parts.length <= 1) return parts[0] ?? "";
-    return parts.map((p) => `(${p})`).join(" or ");
+    const parts = tabs.map((t) => t.q.trim());
+    // An empty filter matches every card, so the union is every card.
+    if (parts.some((p) => !p)) return "";
+    return parts.length === 1 ? parts[0] : parts.map((p) => `(${p})`).join(" or ");
   };
   const currentQuery = () => (state.browseViewAll ? unionQuery() : activeTab().q);
 
@@ -1191,7 +1192,7 @@ function renderBrowse() {
       count = [...state.col.cards.values()].filter((c) => pred(c, ctx)).length;
     } catch { /* count stays 0 */ }
     const sources = state.browseViewAll
-      ? tabs.map((t, i) => ({ label: `Filter ${i + 1}`, q: t.q.trim() })).filter((s) => s.q)
+      ? tabs.map((t, i) => ({ label: `Filter ${i + 1}`, q: t.q.trim() }))
       : [{ label: `Filter ${state.browseActive + 1}`, q: activeTab().q.trim() }];
     const nameInput = el("input", { type: "text", placeholder: "Deck name" });
     const err = el("div", { class: "pop-err" });
