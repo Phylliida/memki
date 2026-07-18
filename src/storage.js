@@ -13,9 +13,10 @@
 
 import { Collection, Note, Card, Revlog } from "./model.js";
 
-const STORES = ["meta", "notes", "cards", "revlog", "media"];
-const DB_VERSION = 1;
+const STORES = ["meta", "notes", "cards", "revlog", "media", "history"];
+const DB_VERSION = 2;
 const META_KEY = "collection";
+const HISTORY_KEEP = 20; // versions kept per note
 
 const promisify = (req) =>
   new Promise((resolve, reject) => {
@@ -45,6 +46,10 @@ export function openCollectionDB(name = "oss-anki", idb = globalThis.indexedDB) 
       }
       if (!db.objectStoreNames.contains("revlog")) db.createObjectStore("revlog", { keyPath: "id" });
       if (!db.objectStoreNames.contains("media")) db.createObjectStore("media", { keyPath: "name" });
+      if (!db.objectStoreNames.contains("history")) {
+        const history = db.createObjectStore("history", { keyPath: "id", autoIncrement: true });
+        history.createIndex("nid", "nid", { unique: false });
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -113,6 +118,34 @@ export async function putRevlog(db, entry) {
 export async function deleteRevlog(db, id) {
   const tx = db.transaction("revlog", "readwrite");
   tx.objectStore("revlog").delete(id);
+  await txDone(tx);
+}
+
+/** Record a note's field/tag snapshot in its edit history (pruned to the last N). */
+export async function pushNoteHistory(db, nid, fields, tags) {
+  const tx = db.transaction("history", "readwrite");
+  tx.objectStore("history").put({ nid, ts: Date.now(), fields: [...fields], tags: [...tags] });
+  await txDone(tx);
+  const tx2 = db.transaction("history", "readwrite");
+  const keys = await promisify(tx2.objectStore("history").index("nid").getAllKeys(nid));
+  for (const k of keys.slice(0, Math.max(0, keys.length - HISTORY_KEEP))) {
+    tx2.objectStore("history").delete(k);
+  }
+  await txDone(tx2);
+}
+
+/** A note's edit history, newest first. @returns {Promise<{ts:number,fields:string[],tags:string[]}[]>} */
+export async function listNoteHistory(db, nid) {
+  const tx = db.transaction("history", "readonly");
+  const rows = await promisify(tx.objectStore("history").index("nid").getAll(nid));
+  return rows.sort((a, b) => b.ts - a.ts);
+}
+
+/** Drop a note's edit history (when the note is deleted). */
+export async function deleteNoteHistory(db, nid) {
+  const tx = db.transaction("history", "readwrite");
+  const keys = await promisify(tx.objectStore("history").index("nid").getAllKeys(nid));
+  for (const k of keys) tx.objectStore("history").delete(k);
   await txDone(tx);
 }
 

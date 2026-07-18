@@ -17,6 +17,7 @@ import { stripHtml, stripHtmlPreservingMediaFilenames } from "../src/text.js";
 import {
   openCollectionDB, loadCollection, saveCollection,
   putCard, putNote, putRevlog, putMeta, saveMedia, loadMedia, clearAll, deleteCards, deleteNoteAndCards, deleteRevlog,
+  pushNoteHistory, listNoteHistory, deleteNoteHistory,
 } from "../src/storage.js";
 
 const SQL_CDN = "https://cdn.jsdelivr.net/npm/sql.js@1.14.1/dist/";
@@ -1306,6 +1307,7 @@ function noteEditorForm(noteId, cb = {}) {
     return [...s].sort((a, b) => a.localeCompare(b));
   };
   const applyTags = async () => {
+    await ensureHistory();
     note.tags = [...noteTags].sort((a, b) => a.localeCompare(b));
     note.mod = Math.floor(Date.now() / 1000);
     await putNote(state.db, note);
@@ -1354,12 +1356,23 @@ function noteEditorForm(noteId, cb = {}) {
   };
   renderTags();
 
+  // Edit history: the pre-edit state is snapshotted once per editing session
+  // (before the first change lands), restorable from the History modal.
+  const original = { fields: [...note.fields], tags: [...note.tags] };
+  let historySaved = false;
+  const ensureHistory = async () => {
+    if (historySaved) return;
+    historySaved = true;
+    await pushNoteHistory(state.db, note.id, original.fields, original.tags);
+  };
+
   // Auto-save: field edits persist as you type (debounced), and immediately
   // when focus leaves the editor. There is no Save button.
   let saveTimer = null;
   const doSave = async () => {
     saveTimer = null;
     if (!state.col.notes.has(note.id)) return; // deleted meanwhile
+    await ensureHistory();
     note.fields = inputs.map(({ ed }) => ed.getHTML());
     note.mod = Math.floor(Date.now() / 1000);
     note.normalize(model.sortf ?? 0);
@@ -1391,8 +1404,37 @@ function noteEditorForm(noteId, cb = {}) {
     saveTimer = null;
     const cardIds = state.col.removeNote(noteId);
     await deleteNoteAndCards(state.db, noteId, cardIds);
+    await deleteNoteHistory(state.db, noteId);
     setStatus("Deleted.");
     cb.onDeleted?.();
+  };
+
+  // History modal: past versions of this note, restorable (restoring first
+  // snapshots the current state, so restores are themselves undoable).
+  const openHistoryModal = async () => {
+    const entries = await listNoteHistory(state.db, note.id);
+    const rows = entries.length
+      ? entries.map((e) => el("div", { class: "hist-row" },
+          el("div", { class: "hist-meta" },
+            el("b", {}, new Date(e.ts).toLocaleString()),
+            el("span", { class: "muted" }, ` · ${stripHtml(e.fields[0] ?? "").slice(0, 60) || "(empty)"}`)),
+          el("button", { type: "button", onclick: async () => {
+            await pushNoteHistory(state.db, note.id, inputs.map(({ ed }) => ed.getHTML()), [...note.tags]);
+            note.fields = [...e.fields];
+            note.tags = [...e.tags];
+            note.mod = Math.floor(Date.now() / 1000);
+            note.normalize(model.sortf ?? 0);
+            await putNote(state.db, note);
+            close();
+            setStatus("Restored.");
+            refresh();
+          } }, "Restore")))
+      : [el("div", { class: "center muted" }, "No earlier versions yet — history is recorded when you edit.")];
+    const { close } = openModal([
+      el("h3", {}, "Note history"),
+      ...rows,
+      el("div", { class: "row" }, el("button", { type: "button", onclick: () => close() }, "Close")),
+    ]);
   };
 
   const cardCount = state.col.cardsForNote(noteId).length;
@@ -1415,6 +1457,7 @@ function noteEditorForm(noteId, cb = {}) {
         async (n) => { await applyToNoteCards(note, (s, c) => s.toggleFlag(c, n)); refresh(); })),
     el("div", { class: "row ne-bottom" },
       el("button", { onclick: () => openDeckModalForNote(note, refresh) }, "Decks"),
+      el("button", { onclick: openHistoryModal }, "History"),
       el("button", { class: "danger", onclick: del }, "Delete"),
     ),
   );

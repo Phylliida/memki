@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 import {
   openCollectionDB, saveCollection, loadCollection, putCard, saveMedia, loadMedia, clearAll,
+  pushNoteHistory, listNoteHistory, deleteNoteHistory,
 } from "../src/storage.js";
 import { Collection, Note, Card, CardType } from "../src/model.js";
 
@@ -88,4 +89,23 @@ test("clearAll empties the database", async () => {
   await clearAll(db);
   assert.equal(await loadCollection(db), null);
   db.close();
+});
+
+test("note edit history: push, list (newest first), prune, delete", async () => {
+  const db = await openCollectionDB(`hist-${Date.now()}`, indexedDB);
+  await pushNoteHistory(db, 42, ["v1", "a"], []);
+  await pushNoteHistory(db, 42, ["v2", "b"], ["t"]);
+  await pushNoteHistory(db, 99, ["other"], []);
+  const hist = await listNoteHistory(db, 42);
+  assert.equal(hist.length, 2);
+  assert.deepEqual(hist.map((h) => h.fields[0]).includes("v2"), true);
+  assert.deepEqual((await listNoteHistory(db, 99)).length, 1);
+
+  // prune: cap is 20 per note
+  for (let i = 0; i < 30; i++) await pushNoteHistory(db, 42, [`v${i + 3}`], []);
+  assert.equal((await listNoteHistory(db, 42)).length, 20);
+
+  await deleteNoteHistory(db, 42);
+  assert.equal((await listNoteHistory(db, 42)).length, 0);
+  assert.equal((await listNoteHistory(db, 99)).length, 1); // untouched
 });

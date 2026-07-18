@@ -253,6 +253,10 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 .br-state.review { color: var(--good); }
 .br-state.suspended { color: var(--again); }
 
+/* Note history rows */
+.hist-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.hist-meta { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* Centered modal (on top of everything) */
 .modal-overlay {
   position: fixed; inset: 0; z-index: 100;
