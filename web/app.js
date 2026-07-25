@@ -1165,12 +1165,12 @@ function renderAddCard() {
       deckName: decks.find((d) => String(d.id) === deckSel.value)?.name ?? "",
     });
     previewBox.replaceChildren(
-      el("div", { class: "muted pv-count" },
-        `Will create ${ords.length} card${ords.length > 1 ? "s" : ""} · previewing "${model.tmpls[model.type === NoteTypeKind.Cloze ? 0 : ords[0]]?.name ?? ""}"`),
       el("div", { class: "pv-pair" },
         el("div", { class: "card-face pv" }, el("div", { class: "card", html: displayHtml(question) })),
         el("div", { class: "card-face pv" }, el("div", { class: "card", html: displayHtml(answer) })),
       ),
+      el("div", { class: "muted pv-count" },
+        `Will create ${ords.length} card${ords.length > 1 ? "s" : ""} · previewing "${model.tmpls[model.type === NoteTypeKind.Cloze ? 0 : ords[0]]?.name ?? ""}"`),
     );
     wireSoundVolumes(previewBox);
     typesetMath();
@@ -1212,6 +1212,7 @@ function renderAddCard() {
     el("div", { class: "form" },
       el("div", { class: "row" }, el("label", {}, "Note type", modelSel), el("label", {}, "Deck", deckSel)),
       fieldsWrap,
+      el("h2", {}, "Preview"),
       previewBox,
     ),
   );

@@ -109,6 +109,8 @@ button.icon:hover { border-color: var(--border); }
 }
 .card-face img { max-width: 100%; height: auto; }
 .card-face .av { display: block; margin: 14px auto; max-width: 100%; }
+/* Code blocks stay left-aligned even though card text defaults to centered. */
+.card-face pre { text-align: left; }
 /* The inner .card carries the note type's own (scoped) CSS; give it a clean
    default canvas so light-themed deck styling reads correctly. */
 .card-face .card { background: #fff; color: #000; border-radius: 8px; padding: 20px; }
