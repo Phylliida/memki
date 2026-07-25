@@ -23,7 +23,7 @@ export back to `.apkg`.
 | `.apkg` / `.colpkg` import + export | ✅ legacy **and modern (schema-18) packages**; import adds decks (notes dedup by GUID, decks match by name). Export is a **lossy compatibility snapshot** — see Formats |
 | JSON backup / restore | ✅ one-file backup of collection + media — **the native format** |
 | Sync merge engine | ✅ static-file sync core: deterministic, order-insensitive merge (revlog unions, notes by GUID, cards by note/deck/ord, delete-wins) |
-| CSV / TSV import | ✅ delimiter detect, header, column→field mapping |
+| CSV / TSV import | ✅ via the header Import button (or direct screen): delimiter detect, header, column→field mapping |
 | Markdown field editor (`src/markdown.js`) | ✅ fields are **markdown** (CommonMark + GFM, vendored marked — offline, no build). Media tokens are inline widgets: resizable images (`{width=N}`), audio/video players with volume; drag-drop / paste media; cloze shortcut; own **undo/redo** stack (Ctrl+Z / Ctrl+Shift+Z, toolbar ↶ ↷). LaTeX in `$…$` / `$$…$$` / `\(...\)` / `\[...\]` / `[latex]` (MathJax at render; `$` normalized to `\(` so Anki understands it too). Fenced code blocks are **syntax-highlighted** (vendored highlight.js, 192 languages). Legacy HTML fields pass through untouched |
 | Day rollover | ✅ local days, configurable rollover hour (default 4 AM), creationOffset |
 | Stock note types | ✅ Basic, and-reversed, optional-reversed, type-in, Cloze; conditional card generation |

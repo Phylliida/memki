@@ -1241,11 +1241,13 @@ async function putNoteAndMeta(note) {
   await putMeta(state.db, state.col);
 }
 
-function renderImportCsv() {
+function renderImportCsv(file = null) {
   state.card = null;
   const models = Object.values(state.col.models);
   const decks = Object.values(state.col.decks).filter((d) => !d.dyn);
   const fileInput = el("input", { type: "file", accept: ".csv,.tsv,.txt" });
+  // A file preselected from the header Import button (the input can override).
+  let pickedFile = file;
   const modelSel = el("select", {}, ...models.map((m) => el("option", { value: m.id }, m.name)));
   modelSel.value = validModelId(state.col.conf.curModel);
   const deckSel = el("select", {}, ...decks.map((d) => el("option", { value: d.id }, d.name)));
@@ -1283,12 +1285,11 @@ function renderImportCsv() {
   };
 
   const reparse = async () => {
-    const f = fileInput.files[0];
-    if (!f) return;
-    parsed = parseCsv(await f.text(), delimSel.value || undefined);
+    if (!pickedFile) return;
+    parsed = parseCsv(await pickedFile.text(), delimSel.value || undefined);
     buildMapping();
   };
-  fileInput.addEventListener("change", reparse);
+  fileInput.addEventListener("change", () => { pickedFile = fileInput.files[0] ?? null; reparse(); });
   delimSel.addEventListener("change", reparse);
   headerChk.addEventListener("change", buildMapping);
   modelSel.addEventListener("change", buildMapping);
@@ -1313,10 +1314,10 @@ function renderImportCsv() {
   };
 
   show(
-    el("div", { class: "crumbs", onclick: renderAddCard }, "← Add"),
+    el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
     el("h2", {}, "Import CSV / TSV"),
     el("div", { class: "form" },
-      el("label", {}, "File", fileInput),
+      el("label", {}, pickedFile ? `File (${pickedFile.name})` : "File", fileInput),
       el("div", { class: "row" }, el("label", {}, "Note type", modelSel), el("label", {}, "Deck", deckSel)),
       el("div", { class: "row" },
         el("label", {},
@@ -1332,6 +1333,7 @@ function renderImportCsv() {
       el("div", { class: "row" }, el("button", { onclick: doImport }, "Import")),
     ),
   );
+  if (pickedFile) reparse();
 }
 
 // --- browse / edit ---
@@ -2600,6 +2602,9 @@ async function doRestore(file) {
 
 async function doImport(file) {
   if (file.name.toLowerCase().endsWith(".json")) return doRestore(file);
+  // CSV/TSV goes to the dedicated mapping screen (column → field, header,
+  // delimiter) rather than being imported blindly.
+  if (/\.(csv|tsv|txt)$/i.test(file.name)) return renderImportCsv(file);
   // Always merge into the current collection: imported decks are added as new
   // decks (matched by name), notes dedup/update by GUID. Existing cards'
   // scheduling is never touched.
