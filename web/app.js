@@ -631,11 +631,17 @@ function mediaUrl(name) {
 }
 
 function resolveMedia(html) {
-  // Quoted src values may contain spaces ("Screen Shot ….png"); bare ones may not.
-  return html.replace(/(src\s*=\s*)("([^"]*)"|'([^']*)'|([^"'>\s]+))/gi, (m, pre, _v, dq, sq, uq) => {
-    const url = mediaUrl(safeDecode(dq ?? sq ?? uq));
-    return url ? `${pre}"${url}"` : m;
-  });
+  // Parse properly (the browser's parser, not a regex): quoted values with
+  // spaces, entity encoding, and attribute order are all handled correctly.
+  const tpl = document.createElement("template");
+  tpl.innerHTML = html;
+  for (const node of tpl.content.querySelectorAll("img, audio, video, source")) {
+    const src = node.getAttribute("src");
+    if (!src) continue;
+    const url = mediaUrl(safeDecode(src));
+    if (url) node.setAttribute("src", url);
+  }
+  return tpl.innerHTML;
 }
 
 // Anki embeds audio/video in fields as [sound:filename]; turn each into a
