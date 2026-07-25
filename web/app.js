@@ -631,8 +631,9 @@ function mediaUrl(name) {
 }
 
 function resolveMedia(html) {
-  return html.replace(/(src\s*=\s*)(["']?)([^"'>\s]+)\2/gi, (m, pre, _q, name) => {
-    const url = mediaUrl(safeDecode(name));
+  // Quoted src values may contain spaces ("Screen Shot ….png"); bare ones may not.
+  return html.replace(/(src\s*=\s*)("([^"]*)"|'([^']*)'|([^"'>\s]+))/gi, (m, pre, _v, dq, sq, uq) => {
+    const url = mediaUrl(safeDecode(dq ?? sq ?? uq));
     return url ? `${pre}"${url}"` : m;
   });
 }
