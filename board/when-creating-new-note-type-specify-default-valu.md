@@ -17,30 +17,23 @@ When creating a new note type, specify default values for each field.
 
 ## Writeup
 
+(Revised after the human clarified the intended design: defaults belong in
+the Edit Note Type screen, not the creation popout.)
+
 The "+ New" button on the Note Types screen used two native popups:
 `prompt()` for the name and `confirm("Cloze type? OK=Cloze Cancel=Standard")`.
-Both are replaced by one popout panel (`.pop-panel`, anchored under the
-button like the tag popout):
+Both are replaced by one anchored popout panel: name input (Enter creates),
+**Cloze? Yes / No** toggle buttons, Create / Cancel. Nothing else.
 
-- name input (Enter creates),
-- **Cloze? Yes / No** toggle buttons (no more OK/Cancel semantics),
-- a default-value input per field — Front/Back for Standard, Text/Back Extra
-  for Cloze, rebuilt when the toggle flips (entered values kept by position),
-- Create / Cancel.
+Default field values live in the Edit Note Type screen: each field row is
+`[name input] [default-value input] [remove]`, default blank. On Save, a
+non-empty value is stored as `f.default` on the field object (plain extra
+JSON key — persists in the native JSON backup, rides along in `.apkg` model
+JSON where Anki ignores unknown keys; round-trip test in
+apkg-roundtrip.test.js). Blank clears the key. `renderAddCard` prefills each
+field's editor with `f.default ?? ""` when the note type is selected.
 
-Defaults are stored as `f.default` on the field objects of the note type —
-plain extra JSON keys, so they persist in the native JSON backup and ride
-along in `.apkg` model JSON (Anki ignores unknown keys; verified by a round-
-trip test). `renderAddCard` prefills each field's editor with
-`f.default ?? ""` when the note type is selected.
+Assumption: defaults prefill the EDITOR (they become note content on save),
+not a display-time fallback.
 
-Assumptions / not done:
-- Defaults only set at creation time; editing defaults later means editing
-  JSON or re-creating. An "edit default" affordance in the note-type editor
-  would be a natural follow-up.
-- Defaults prefill the EDITOR (they're part of the note content once saved),
-  not a display-time fallback.
-
-Verified: 185/185 node tests green (new round-trip test for `f.default`),
-syntax checked. Not browser-tested — popout positioning (`.pop-anchor`) is
-the thing to eyeball.
+Verified: 185/185 node tests green, syntax checked. Not browser-tested.
