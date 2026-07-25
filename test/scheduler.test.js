@@ -7,7 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { Scheduler, _internal } from "../src/scheduler.js";
-import { Collection, Note, Card, CardType, CardQueue } from "../src/model.js";
+import { Collection, Note, Card, CardType, CardQueue, cardFlagSet, writeCardFlags } from "../src/model.js";
 import { Rating } from "../src/fsrs.js";
 
 const { LearningSteps, reviewNextStates, learnNextStates, relearnNextStates, leechThresholdMet, withReviewFuzz } = _internal;
@@ -247,4 +247,27 @@ test("FSRS lifecycle: new card gets memory state and FSRS-derived interval", () 
   // Review interval should match FSRS nextInterval(stability) at 0.9 retention, ~= stability.
   assert.ok(card.ivl >= 1);
   assert.equal(col.revlog.length, 1);
+});
+
+test("toggleFlag is exclusive (Anki-style): one flag, toggling the active one clears", () => {
+  const col = Collection.createDefault();
+  const note = new Note({ mid: Object.values(col.models)[0].id, fields: ["q", "a"] }).normalize();
+  col.addNote(note);
+  const card = col.addCard(new Card({ nid: note.id, did: 1 }));
+  const sched = new Scheduler(col);
+
+  sched.toggleFlag(card, 2);
+  assert.deepEqual([...cardFlagSet(card)], [2]);
+  sched.toggleFlag(card, 4); // switches, doesn't add
+  assert.deepEqual([...cardFlagSet(card)], [4]);
+  sched.toggleFlag(card, 4); // toggling the active one clears
+  assert.deepEqual([...cardFlagSet(card)], []);
+
+  // Legacy multi-flag data collapses on the next toggle.
+  writeCardFlags(card, new Set([1, 3]));
+  sched.toggleFlag(card, 3);
+  assert.deepEqual([...cardFlagSet(card)], [3]);
+  // Anki mirror bits stay readable: the only flag is in the low 3 bits.
+  sched.toggleFlag(card, 5);
+  assert.equal(card.flags & 7, 5);
 });

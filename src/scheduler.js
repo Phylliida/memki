@@ -684,11 +684,12 @@ export class Scheduler {
   }
   buryCard(card) { card.queue = CardQueue.UserBuried; this._touch(card); }
   setFlag(card, n) { card.flags = (card.flags & ~7) | (n & 7); this._touch(card); }
-  /** Toggle one of the (non-exclusive) flags 1–7 on a card. */
+  /** Toggle flag n (1–7) on a card, exclusively (Anki-style): at most one
+   * flag; toggling the active one clears it. (Legacy multi-flag cards still
+   * read correctly; any toggle collapses them to the exclusive form.) */
   toggleFlag(card, n) {
     const s = cardFlagSet(card);
-    if (s.has(n)) s.delete(n); else s.add(n);
-    writeCardFlags(card, s);
+    writeCardFlags(card, s.size === 1 && s.has(n) ? new Set() : new Set([n]));
     this._touch(card);
   }
 

@@ -44,12 +44,13 @@ Not implemented (by request): AnkiWeb sync, FSRS optimizer, add-ons, TTS.
 ## Formats
 
 **The JSON backup is the native format** — it captures everything, including
-the parts of our model that Anki's cannot express: non-exclusive flags, notes
-living in multiple decks, and per-deck scheduling memory. **`.apkg` export is a
-lossy compatibility snapshot** for moving cards into Anki: multi-flags degrade
-to the lowest flag, and the per-deck memory rides opaquely in `notes.data`.
-Prefer JSON for backups and device-to-device transfer; use `.apkg` to share
-decks with Anki users.
+the parts of our model that Anki's cannot express: notes living in multiple
+decks and per-deck scheduling memory. Flags are exclusive (0–7), exactly like
+Anki. **`.apkg` export is a lossy compatibility snapshot** for moving cards
+into Anki: the per-deck memory rides opaquely in `notes.data`, and legacy
+multi-flag cards (from before flags became exclusive) degrade to their lowest
+flag. Prefer JSON for backups and device-to-device transfer; use `.apkg` to
+share decks with Anki users.
 
 **Fields are markdown source.** Cards render them through marked (with math,
 `[sound:]`, and image `{width=N}` extensions) at display time, and `.apkg`

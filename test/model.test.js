@@ -378,7 +378,7 @@ test("changeNoteType remaps fields, resets scheduling, keeps decks/flags/tags", 
   const res = col.changeNoteType(note.id, reversed.id, [0, 1]);
   assert.ok(res);
   assert.deepEqual(res.decks.sort(), [1, wow.id].sort());
-  assert.deepEqual([...res.flags].sort(), [1, 2, 5]); // union across old cards
+  assert.deepEqual([...res.flags].sort(), [1]); // exclusive: lowest across old cards
   assert.equal(res.deletedIds.length, 2);
   assert.equal(col.cardsForNote(note.id).length, 0); // old cards gone
   assert.equal(note.mid, reversed.id);
@@ -393,7 +393,7 @@ test("changeNoteType remaps fields, resets scheduling, keeps decks/flags/tags", 
       writeCardFlags(card, res.flags);
       assert.equal(card.type, CardType.New);
       assert.equal(card.reps, 0);
-      assert.deepEqual([...cardFlagSet(card)].sort(), [1, 2, 5]);
+      assert.deepEqual([...cardFlagSet(card)].sort(), [1]);
     }
   }
   assert.equal(col.cardsForNote(note.id).length, 4);

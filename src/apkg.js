@@ -309,6 +309,17 @@ export function importPackage(bytes, { SQL } = {}) {
   }
 }
 
+/**
+ * A card's export row: the flags column must be Anki's single flag (0–7).
+ * Our internal encoding keeps a multi-flag mask in the high bits (legacy);
+ * stripping degrades it to the lowest flag, as the README documents.
+ */
+function exportCardRow(c) {
+  const row = c.toRow();
+  row[16] = c.flags & 7;
+  return row;
+}
+
 /** Serialize a Collection into a schema-v11 SQLite file (Uint8Array). */
 function writeCollectionDb(SQL, col) {
   const db = new SQL.Database();
@@ -329,7 +340,7 @@ function writeCollectionDb(SQL, col) {
       }
     };
     insertAll(`INSERT INTO notes VALUES (${Q(11)})`, [...col.notes.values()].map((n) => exportNoteRow(col, n)));
-    insertAll(`INSERT INTO cards VALUES (${Q(18)})`, [...col.cards.values()].map((c) => c.toRow()));
+    insertAll(`INSERT INTO cards VALUES (${Q(18)})`, [...col.cards.values()].map((c) => exportCardRow(c)));
     insertAll(`INSERT INTO revlog VALUES (${Q(9)})`, col.revlog.map((r) => r.toRow()));
 
     return db.export();

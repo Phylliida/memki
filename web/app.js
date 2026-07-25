@@ -1147,7 +1147,9 @@ function renderAddCard() {
   const flagWrap = el("span");
   const renderNewFlags = () => {
     flagWrap.replaceChildren(flagPicker(newFlags, (n) => {
-      if (newFlags.has(n)) newFlags.delete(n); else newFlags.add(n);
+      // Exclusive (Anki-style): toggling the active flag clears it.
+      if (newFlags.size === 1 && newFlags.has(n)) newFlags.clear();
+      else { newFlags.clear(); newFlags.add(n); }
       renderNewFlags();
     }));
   };

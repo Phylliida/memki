@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { importPackage, exportPackage } from "../src/apkg.js";
 import { initSqlJsNode } from "../src/sqljs-node.js";
-import { Collection, Note, Card, NoteTypeKind } from "../src/model.js";
+import { Collection, Note, Card, NoteTypeKind, writeCardFlags } from "../src/model.js";
 import { fieldChecksum } from "../src/text.js";
 
 const SQL = await initSqlJsNode();
@@ -108,4 +108,17 @@ test("field default values round-trip through export (unknown key tolerated)", (
   const back = Object.values(round.models).find((m) => m.name === "With Defaults");
   assert.equal(back.flds[0].default, "**prefilled**");
   assert.equal(back.flds.length, 2);
+});
+
+test("export strips card flags to Anki's 0-7 (legacy multi-flag degrades to lowest)", () => {
+  const col = Collection.createDefault();
+  const mid = Object.values(col.models)[0].id;
+  const note = new Note({ mid, fields: ["q", "a"] }).normalize();
+  col.addNote(note);
+  const card = col.addCard(new Card({ nid: note.id, did: 1 }));
+  writeCardFlags(card, new Set([2, 5])); // legacy multi-flag encoding (high bits)
+
+  const out = exportPackage(col, new Map(), { SQL });
+  const back = [...importPackage(out, { SQL }).collection.cards.values()][0];
+  assert.equal(back.flags, 2); // lowest flag, Anki-readable
 });

@@ -673,8 +673,13 @@ export class Collection {
     if (!note || !newModel) return null;
     const oldCards = this.cardsForNote(noteId);
     const decks = [...new Set(oldCards.map((c) => c.did))];
-    const flags = new Set();
-    for (const c of oldCards) for (const f of cardFlagSet(c)) flags.add(f);
+    // Flags are exclusive (Anki-style): carry the lowest active flag.
+    let lowest = 0;
+    for (const c of oldCards) {
+      const s = cardFlagSet(c);
+      if (s.size) lowest = lowest ? Math.min(lowest, Math.min(...s)) : Math.min(...s);
+    }
+    const flags = lowest ? new Set([lowest]) : new Set();
     const deletedIds = oldCards.map((c) => c.id);
     for (const c of oldCards) {
       this.cards.delete(c.id);
