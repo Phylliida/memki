@@ -1231,7 +1231,7 @@ function renderAddCard() {
     el("div", { class: "form" },
       el("div", { class: "row" }, el("label", {}, "Note type", modelSel), el("label", {}, "Deck", deckSel)),
       fieldsWrap,
-      el("h2", {}, "Preview"),
+      el("h2", { class: "pv-head" }, "Preview"),
       previewBox,
       el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Tags"), tagBubblePicker(newTags)),
       el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Flags"), flagWrap),

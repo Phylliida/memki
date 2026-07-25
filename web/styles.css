@@ -390,7 +390,8 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 
 /* Live previews (Add Card, template editor) */
 .preview-box { margin-top: 4px; }
-.pv-count { font-size: 12px; margin: 8px 0 4px; }
+.pv-head { margin-bottom: 0; }
+.pv-count { font-size: 12px; margin: 4px 0 12px; }
 .pv-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .pv-pair .card-face { min-height: 0; padding: 12px; font-size: 15px; }
 .pv-pair .card-face .card { padding: 12px; }
