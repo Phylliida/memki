@@ -24,7 +24,7 @@ export back to `.apkg`.
 | JSON backup / restore | ✅ one-file backup of collection + media — **the native format** |
 | Sync merge engine | ✅ static-file sync core: deterministic, order-insensitive merge (revlog unions, notes by GUID, cards by note/deck/ord, delete-wins) |
 | CSV / TSV import | ✅ delimiter detect, header, column→field mapping |
-| Markdown field editor (`src/markdown.js`) | ✅ fields are **markdown** (CommonMark + GFM, vendored marked — offline, no build). Media tokens are inline widgets: resizable images (`{width=N}`), audio/video players with volume; drag-drop / paste media; cloze shortcut; own **undo/redo** stack (Ctrl+Z / Ctrl+Shift+Z, toolbar ↶ ↷). Legacy HTML fields pass through untouched |
+| Markdown field editor (`src/markdown.js`) | ✅ fields are **markdown** (CommonMark + GFM, vendored marked — offline, no build). Media tokens are inline widgets: resizable images (`{width=N}`), audio/video players with volume; drag-drop / paste media; cloze shortcut; own **undo/redo** stack (Ctrl+Z / Ctrl+Shift+Z, toolbar ↶ ↷). LaTeX in `$…$` / `$$…$$` / `\(...\)` / `\[...\]` / `[latex]` (MathJax at render; `$` normalized to `\(` so Anki understands it too). Fenced code blocks are **syntax-highlighted** (vendored highlight.js, 192 languages). Legacy HTML fields pass through untouched |
 | Day rollover | ✅ local days, configurable rollover hour (default 4 AM), creationOffset |
 | Stock note types | ✅ Basic, and-reversed, optional-reversed, type-in, Cloze; conditional card generation |
 | Scheduler (v3: SM-2 + FSRS, fuzz, daily limits, burying, learn-ahead) | ✅ matches rslib state-machine + fuzz vectors |

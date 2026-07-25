@@ -1057,6 +1057,61 @@ function addNoteWithCards(model, fields, did, tags = []) {
   return note;
 }
 
+/**
+ * Tag toggle bubbles shared by the add-card and edit-note screens: one bubble
+ * per tag in the collection, toggled in the `selected` set; "+ New tag" opens
+ * a small popout. `onChange` is awaited after every change (edit-note uses it
+ * to persist; add-card passes none and applies the set on Save).
+ */
+function tagBubblePicker(selected, onChange) {
+  const box = el("div", { class: "tag-bubbles" });
+  const pop = el("div", { class: "pop-panel tag-pop" });
+  pop.style.display = "none";
+  const inp = el("input", { type: "text", placeholder: "tag-name (no spaces)" });
+  const addIt = async () => {
+    const t = inp.value.trim().replace(/\s+/g, "_");
+    if (!t) return;
+    selected.add(t);
+    inp.value = "";
+    pop.style.display = "none";
+    await onChange?.();
+    refresh();
+  };
+  inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addIt(); } });
+  pop.append(
+    el("h3", {}, "New tag"),
+    inp,
+    el("div", { class: "row" },
+      el("button", { type: "button", onclick: addIt }, "Add"),
+      el("button", { type: "button", onclick: () => { pop.style.display = "none"; } }, "Cancel")),
+  );
+  const allTags = () => {
+    const s = new Set(selected);
+    for (const n of state.col.notes.values()) for (const t of n.tags) s.add(t);
+    return [...s].sort((a, b) => a.localeCompare(b));
+  };
+  const refresh = () => {
+    box.replaceChildren(
+      ...allTags().map((t) =>
+        el("button", {
+          type: "button", class: `tag-bub${selected.has(t) ? " on" : ""}`,
+          onclick: async () => {
+            if (selected.has(t)) selected.delete(t); else selected.add(t);
+            await onChange?.();
+            refresh();
+          },
+        }, t)),
+      el("button", { type: "button", class: "tag-bub ghost", onclick: () => {
+        pop.style.display = pop.style.display === "none" ? "" : "none";
+        if (pop.style.display === "") inp.focus();
+      } }, "+ New tag"),
+      pop,
+    );
+  };
+  refresh();
+  return box;
+}
+
 function renderAddCard() {
   state.card = null;
   const models = Object.values(state.col.models);
@@ -1064,6 +1119,18 @@ function renderAddCard() {
   const modelSel = el("select", {}, ...models.map((m) => el("option", { value: m.id }, m.name)));
   modelSel.value = validModelId(state.col.conf.curModel);
   const deckSel = el("select", {}, ...decks.map((d) => el("option", { value: d.id }, d.name)));
+
+  // Top-right actions: tag + flag toggles for the new note, then Save.
+  const newTags = new Set();
+  const newFlags = new Set();
+  const flagWrap = el("span");
+  const renderNewFlags = () => {
+    flagWrap.replaceChildren(flagPicker(newFlags, (n) => {
+      if (newFlags.has(n)) newFlags.delete(n); else newFlags.add(n);
+      renderNewFlags();
+    }));
+  };
+  renderNewFlags();
 
   const fieldsWrap = el("div", { class: "form-fields" });
   let inputs = [];
@@ -1122,7 +1189,11 @@ function renderAddCard() {
     // Emptiness check Anki-style: media filenames count as content, so an
     // image-only (or [sound:]-only) first field is a valid note.
     if (!stripHtmlPreservingMediaFilenames(fields[0]).trim()) { setStatus("The first field is empty."); return; }
-    const note = addNoteWithCards(model, fields, Number(deckSel.value));
+    const note = addNoteWithCards(model, fields, Number(deckSel.value),
+      [...newTags].sort((a, b) => a.localeCompare(b)));
+    if (newFlags.size) {
+      for (const c of state.col.cardsForNote(note.id)) writeCardFlags(c, new Set(newFlags));
+    }
     await putNoteAndMeta(note);
     for (const c of state.col.cardsForNote(note.id)) await putCard(state.db, c);
     const count = state.col.cardsForNote(note.id).length;
@@ -1132,12 +1203,16 @@ function renderAddCard() {
 
   show(
     el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
-    el("h2", {}, "Add Card"),
+    el("div", { class: "add-head" },
+      el("h2", {}, "Add Card"),
+      el("div", { class: "add-actions" },
+        el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Tags"), tagBubblePicker(newTags)),
+        el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Flags"), flagWrap),
+        el("button", { onclick: save }, "Save"))),
     el("div", { class: "form" },
       el("div", { class: "row" }, el("label", {}, "Note type", modelSel), el("label", {}, "Deck", deckSel)),
       fieldsWrap,
       el("div", { class: "row" },
-        el("button", { onclick: save }, "Save"),
         el("button", { onclick: renderImportCsv }, "Import CSV/TSV"),
         el("button", { onclick: renderImageOcclusion }, "Image Occlusion"),
       ),
@@ -1597,11 +1672,6 @@ function noteEditorForm(noteId, cb = {}) {
   // Tags are bubbles: one per tag in the collection, toggled on/off for this
   // note and persisted immediately; "+ New tag" opens a small popout.
   const noteTags = new Set(note.tags ?? []);
-  const allTags = () => {
-    const s = new Set(noteTags);
-    for (const n of state.col.notes.values()) for (const t of n.tags) s.add(t);
-    return [...s].sort((a, b) => a.localeCompare(b));
-  };
   const applyTags = async () => {
     await ensureHistory();
     note.tags = [...noteTags].sort((a, b) => a.localeCompare(b));
@@ -1609,48 +1679,7 @@ function noteEditorForm(noteId, cb = {}) {
     await putNote(state.db, note);
     cb.onTagsChanged?.();
   };
-  const tagBox = el("div", { class: "tag-bubbles" });
-  const newTagPop = el("div", { class: "pop-panel tag-pop" });
-  newTagPop.style.display = "none";
-  {
-    const inp = el("input", { type: "text", placeholder: "tag-name (no spaces)" });
-    const addIt = async () => {
-      const t = inp.value.trim().replace(/\s+/g, "_");
-      if (!t) return;
-      noteTags.add(t);
-      inp.value = "";
-      newTagPop.style.display = "none";
-      await applyTags();
-      renderTags();
-    };
-    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addIt(); } });
-    newTagPop.append(
-      el("h3", {}, "New tag"),
-      inp,
-      el("div", { class: "row" },
-        el("button", { type: "button", onclick: addIt }, "Add"),
-        el("button", { type: "button", onclick: () => { newTagPop.style.display = "none"; } }, "Cancel")),
-    );
-  }
-  const renderTags = () => {
-    tagBox.replaceChildren(
-      ...allTags().map((t) =>
-        el("button", {
-          type: "button", class: `tag-bub${noteTags.has(t) ? " on" : ""}`,
-          onclick: async () => {
-            if (noteTags.has(t)) noteTags.delete(t); else noteTags.add(t);
-            await applyTags();
-            renderTags();
-          },
-        }, t)),
-      el("button", { type: "button", class: "tag-bub ghost", onclick: () => {
-        newTagPop.style.display = newTagPop.style.display === "none" ? "" : "none";
-        if (newTagPop.style.display === "") newTagPop.querySelector("input")?.focus();
-      } }, "+ New tag"),
-      newTagPop,
-    );
-  };
-  renderTags();
+  const tagBox = tagBubblePicker(noteTags, applyTags);
 
   // Edit history: the pre-edit state is snapshotted once per editing session
   // (before the first change lands), restorable from the History modal.

@@ -318,6 +318,12 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 /* Tag bubbles in the note editor */
 .form-tags { display: flex; flex-direction: column; gap: 6px; }
 .tag-lbl { font-size: 14px; }
+
+/* Add-card header: title left, tag/flag toggles + Save top-right. */
+.add-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.add-head h2 { margin: 0; }
+.add-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; justify-content: flex-end; }
+.add-actions .form-tags { flex-direction: row; align-items: center; flex-wrap: wrap; }
 .tag-bubbles { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; position: relative; }
 .tag-bub {
   padding: 4px 12px; border-radius: 14px; font-size: 13px;
