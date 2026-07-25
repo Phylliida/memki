@@ -34,17 +34,16 @@ export const NoteTypeKind = Object.freeze({ Standard: 0, Cloze: 1 });
 
 // --- card flags (non-exclusive) ---
 //
-// Anki stores a single flag number in the low 3 bits of cards.flags. We allow
-// multiple flags at once: bits 3–9 hold a bitmask (bit n+2 = flag n), and the
-// low 3 bits mirror the lowest active flag so exports stay Anki-readable.
+// Anki stores a single flag number in the low 3 bits of cards.flags, and we
+// do the same: flags are exclusive (0–7). Legacy collections may still carry
+// the old multi-flag encoding (bits 3–9 = bitmask, bit n+2 = flag n); reads
+// keep only the lowest flag, so old data silently degrades to Anki's model.
 
-/** The set of active flags on a card (numbers 1–7). */
+/** The card's flag (a one-element set for compatibility), or the empty set. */
 export function cardFlagSet(card) {
   const mask = (card.flags >> 3) & 0x7f;
   if (mask) {
-    const s = new Set();
-    for (let n = 1; n <= 7; n++) if (mask & (1 << (n - 1))) s.add(n);
-    return s;
+    for (let n = 1; n <= 7; n++) if (mask & (1 << (n - 1))) return new Set([n]);
   }
   const low = card.flags & 7; // legacy single-flag encoding
   return low ? new Set([low]) : new Set();

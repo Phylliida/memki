@@ -263,8 +263,9 @@ test("toggleFlag is exclusive (Anki-style): one flag, toggling the active one cl
   sched.toggleFlag(card, 4); // toggling the active one clears
   assert.deepEqual([...cardFlagSet(card)], []);
 
-  // Legacy multi-flag data collapses on the next toggle.
+  // Legacy multi-flag data reads as the lowest flag only.
   writeCardFlags(card, new Set([1, 3]));
+  assert.deepEqual([...cardFlagSet(card)], [1]);
   sched.toggleFlag(card, 3);
   assert.deepEqual([...cardFlagSet(card)], [3]);
   // Anki mirror bits stay readable: the only flag is in the low 3 bits.

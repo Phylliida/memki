@@ -192,13 +192,13 @@ test("flag: accepts color names as well as numbers", () => {
   assert.equal(searchCards(col, "flag:mauve").length, 0);
 });
 
-test("flag search matches any of a card's multiple flags", () => {
+test("flag search sees only the lowest flag of legacy multi-flag cards", () => {
   const { col, mk } = build2();
   const c = mk();
-  writeCardFlags(c, new Set([1, 3])); // red + green
+  writeCardFlags(c, new Set([1, 3])); // legacy red + green
   mk(); // unflagged
   assert.equal(searchCards(col, "flag:red").length, 1);
-  assert.equal(searchCards(col, "flag:green").length, 1);
+  assert.equal(searchCards(col, "flag:green").length, 0); // collapsed to red
   assert.equal(searchCards(col, "flag:blue").length, 0);
   assert.equal(searchCards(col, "flag:none").length, 1);
 });

@@ -264,16 +264,16 @@ test("cloneCardsIntoNewDeck: independent deck, fresh cards, own options", () => 
   assert.equal(col.dconf[String(deck.conf)].name, "Bees Redux");
 });
 
-// --- non-exclusive flags ---
+// --- flags (exclusive; legacy multi-flag data collapses to the lowest) ---
 
 import { cardFlagSet, writeCardFlags, cardHasFlag } from "../src/model.js";
 
-test("multiple flags coexist; low bits mirror the lowest for Anki compat", () => {
+test("flags are exclusive; legacy multi-flag data keeps only the lowest", () => {
   const card = new Card({ nid: 1, did: 1 });
-  writeCardFlags(card, new Set([1, 3])); // red + green
-  assert.deepEqual([...cardFlagSet(card)].sort(), [1, 3]);
+  writeCardFlags(card, new Set([1, 3])); // legacy multi-flag encoding
+  assert.deepEqual([...cardFlagSet(card)], [1]); // reads collapse to the lowest
   assert.equal(card.flags & 7, 1); // Anki sees red
-  assert.ok(cardHasFlag(card, 1) && cardHasFlag(card, 3));
+  assert.ok(cardHasFlag(card, 1) && !cardHasFlag(card, 3));
   assert.ok(!cardHasFlag(card, 2) && !cardHasFlag(card, 0));
 
   writeCardFlags(card, new Set()); // clear all
