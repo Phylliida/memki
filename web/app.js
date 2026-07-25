@@ -874,8 +874,11 @@ function renderDecks() {
           el("button", { class: "icon", title: "Custom study", onclick: (e) => { e.stopPropagation(); renderCustomStudy(d.id); } }, icon("bolt")),
           el("button", { class: "icon", title: "Options", onclick: (e) => { e.stopPropagation(); renderDeckOptions(d.id); } }, icon("sliders")),
           el("button", { class: "icon", title: "Rename", onclick: (e) => { e.stopPropagation(); renameDeckPrompt(d); } }, icon("pencil")),
-          Number(d.id) === 1 ? "" :
-            el("button", { class: "icon", title: "Delete", onclick: (e) => { e.stopPropagation(); deleteDeckPrompt(d); } }, icon("trash")),
+          Number(d.id) === 1
+            // Default deck can't be deleted, but keep a grayed-out icon so
+            // every row's action icons line up.
+            ? el("button", { class: "icon", title: "The Default deck can't be deleted", disabled: "", onclick: (e) => e.stopPropagation() }, icon("trash"))
+            : el("button", { class: "icon", title: "Delete", onclick: (e) => { e.stopPropagation(); deleteDeckPrompt(d); } }, icon("trash")),
         );
     const row = el("div", { class: "deck", onclick: () => startStudy(d.id) },
       el("span", { class: "name", style: `padding-left:${depth * 18}px` }, leaf),
@@ -1160,7 +1163,7 @@ function renderAddCard() {
       return;
     }
     fieldsWrap.replaceChildren(...model.flds.map((f) => {
-      const ed = mdEditor("");
+      const ed = mdEditor(f.default ?? ""); // note type may define a default value
       inputs.push(ed);
       return el("div", { class: "fld" }, el("span", {}, f.name), ed.el);
     }));
@@ -1183,12 +1186,12 @@ function renderAddCard() {
       deckName: decks.find((d) => String(d.id) === deckSel.value)?.name ?? "",
     });
     previewBox.replaceChildren(
+      el("div", { class: "muted pv-count" },
+        `Will create ${ords.length} card${ords.length > 1 ? "s" : ""} · previewing "${model.tmpls[model.type === NoteTypeKind.Cloze ? 0 : ords[0]]?.name ?? ""}"`),
       el("div", { class: "pv-pair" },
         el("div", { class: "card-face pv" }, el("div", { class: "card", html: displayHtml(question) })),
         el("div", { class: "card-face pv" }, el("div", { class: "card", html: displayHtml(answer) })),
       ),
-      el("div", { class: "muted pv-count" },
-        `Will create ${ords.length} card${ords.length > 1 ? "s" : ""} · previewing "${model.tmpls[model.type === NoteTypeKind.Cloze ? 0 : ords[0]]?.name ?? ""}"`),
     );
     wireSoundVolumes(previewBox);
     typesetMath();
@@ -1224,14 +1227,14 @@ function renderAddCard() {
     el("div", { class: "add-head" },
       el("h2", {}, "Add Card"),
       el("div", { class: "add-actions" },
-        el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Tags"), tagBubblePicker(newTags)),
-        el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Flags"), flagWrap),
         el("button", { onclick: save }, "Save"))),
     el("div", { class: "form" },
       el("div", { class: "row" }, el("label", {}, "Note type", modelSel), el("label", {}, "Deck", deckSel)),
       fieldsWrap,
       el("h2", {}, "Preview"),
       previewBox,
+      el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Tags"), tagBubblePicker(newTags)),
+      el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Flags"), flagWrap),
     ),
   );
 }
@@ -2367,21 +2370,70 @@ function occlusionFace(note, ord, side) {
 function renderNoteTypes() {
   state.card = null;
   const models = Object.values(state.col.models);
+
+  // "+ New" opens a popout panel (no native prompt/confirm popups): name,
+  // a Cloze? Yes/No toggle, and a default value per field (used to prefill
+  // the add-card editors for this note type).
+  const pop = el("div", { class: "pop-panel nt-pop" });
+  pop.style.display = "none";
+  const nameInp = el("input", { type: "text", placeholder: "Note type name" });
+  let isCloze = false;
+  const yesBtn = el("button", { type: "button", class: "tag-bub" }, "Yes");
+  const noBtn = el("button", { type: "button", class: "tag-bub" }, "No");
+  const defaultInputs = [];
+  const defaultsBox = el("div", { class: "nt-defs" });
+  const renderDefaults = () => {
+    // Same fields addNoteType creates: basicNoteType vs clozeNoteType.
+    const names = isCloze ? ["Text", "Back Extra"] : ["Front", "Back"];
+    const prev = defaultInputs.map((d) => d.value);
+    defaultInputs.length = 0;
+    defaultsBox.replaceChildren(...names.map((n, i) => {
+      const inp = el("input", { type: "text", placeholder: "(empty)", value: prev[i] ?? "" });
+      defaultInputs.push(inp);
+      return el("label", {}, n, inp);
+    }));
+    yesBtn.className = `tag-bub${isCloze ? " on" : ""}`;
+    noBtn.className = `tag-bub${isCloze ? "" : " on"}`;
+  };
+  yesBtn.addEventListener("click", () => { isCloze = true; renderDefaults(); });
+  noBtn.addEventListener("click", () => { isCloze = false; renderDefaults(); });
+  const closePop = () => { pop.style.display = "none"; };
+  const create = async () => {
+    const name = nameInp.value.trim();
+    if (!name) { nameInp.focus(); return; }
+    const nt = state.col.addNoteType(name, isCloze ? NoteTypeKind.Cloze : NoteTypeKind.Standard);
+    nt.flds.forEach((f, i) => {
+      const v = defaultInputs[i]?.value ?? "";
+      if (v) f.default = v; // native-format only; Anki ignores unknown keys
+    });
+    await persistAll();
+    renderEditNoteType(nt.id);
+  };
+  nameInp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); create(); } });
+  pop.append(
+    el("h3", {}, "New note type"),
+    nameInp,
+    el("div", { class: "row nt-cloze-row" }, el("span", { class: "muted" }, "Cloze?"), yesBtn, noBtn),
+    el("span", { class: "muted pop-src" }, "Default field values (prefill new cards):"),
+    defaultsBox,
+    el("div", { class: "row" },
+      el("button", { type: "button", onclick: create }, "Create"),
+      el("button", { type: "button", onclick: closePop }, "Cancel")),
+  );
+  renderDefaults();
   const add = el("button", {
     onclick: () => {
-      const name = prompt("New note type name:");
-      if (!name || !name.trim()) return;
-      const cloze = confirm("Cloze type? (OK = Cloze, Cancel = Standard)");
-      const nt = state.col.addNoteType(name.trim(), cloze ? NoteTypeKind.Cloze : NoteTypeKind.Standard);
-      persistAll().then(() => renderEditNoteType(nt.id));
+      pop.style.display = pop.style.display === "none" ? "" : "none";
+      if (pop.style.display === "") nameInp.focus();
     },
   }, "+ New");
+  const addWrap = el("span", { class: "pop-anchor" }, add, pop);
 
   const STOCK = [basicNoteType, basicReversedNoteType, basicOptionalReversedNoteType, basicTypeNoteType, clozeNoteType];
   const missing = STOCK.filter((f) => !models.some((m) => m.name === f(0).name));
   show(
     el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
-    el("div", { class: "decks-head" }, el("h2", {}, "Note Types"), add),
+    el("div", { class: "decks-head" }, el("h2", {}, "Note Types"), addWrap),
     missing.length
       ? el("div", { class: "row stock-row" }, "Add stock type:", ...missing.map((f) =>
           el("button", { onclick: async () => { state.col.addStockNoteType(f); await persistAll(); renderNoteTypes(); } }, f(0).name)))

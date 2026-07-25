@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { importPackage, exportPackage } from "../src/apkg.js";
 import { initSqlJsNode } from "../src/sqljs-node.js";
-import { Collection, Note, Card } from "../src/model.js";
+import { Collection, Note, Card, NoteTypeKind } from "../src/model.js";
 import { fieldChecksum } from "../src/text.js";
 
 const SQL = await initSqlJsNode();
@@ -96,4 +96,16 @@ test("markdown fields export as HTML with recomputed csum/sfld", () => {
   assert.deepEqual(back.fields, ["<strong>Capital</strong> of France?", "Paris"]);
   assert.equal(back.sfld, "Capital of France?");
   assert.equal(back.csum, fieldChecksum("<strong>Capital</strong> of France?"));
+});
+
+test("field default values round-trip through export (unknown key tolerated)", () => {
+  const col = Collection.createDefault();
+  const nt = col.addNoteType("With Defaults", NoteTypeKind.Standard);
+  nt.flds[0].default = "**prefilled**";
+
+  const out = exportPackage(col, new Map(), { SQL });
+  const round = importPackage(out, { SQL }).collection;
+  const back = Object.values(round.models).find((m) => m.name === "With Defaults");
+  assert.equal(back.flds[0].default, "**prefilled**");
+  assert.equal(back.flds.length, 2);
 });
