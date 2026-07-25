@@ -9,6 +9,7 @@ import {
 } from "../src/model.js";
 import { Scheduler } from "../src/scheduler.js";
 import { renderCard, cardOrdinalsForNote } from "../src/template.js";
+import { mathify } from "../src/mathify.js";
 import { mdToHtml, mdImageToken, mdSoundToken, scanMdMedia } from "../src/markdown.js";
 import { collectionStats } from "../src/stats.js";
 import { compileSearch, searchContext } from "../src/search.js";
@@ -721,14 +722,8 @@ function applyModelCss(model) {
   style.textContent = model?.css ? scopeCss(model.css, ".card-face") : "";
 }
 
-// Convert Anki LaTeX tags to MathJax delimiters; `\(...\)` / `\[...\]` pass through.
-function mathify(html) {
-  return html
-    .replace(/\[latex\]([\s\S]*?)\[\/latex\]/gi, (_m, x) => `\\[${x}\\]`)
-    .replace(/\[\$\$\]([\s\S]*?)\[\/\$\$\]/g, (_m, x) => `\\[${x}\\]`)
-    .replace(/\[\$\]([\s\S]*?)\[\/\$\]/g, (_m, x) => `\\(${x}\\)`);
-}
-
+// Convert all math syntaxes (Anki [latex]/[$]/[$$], bare $..$/$$..$$) to the
+// MathJax \( \) / \[ \] delimiters; those pass through. See src/mathify.js.
 /** Full display pipeline for a field's HTML: math, sounds, media URLs. */
 function displayHtml(html) {
   return resolveMedia(resolveSounds(mathify(html)));
