@@ -294,10 +294,7 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 .pop-panel .row { display: flex; gap: 8px; }
 
 /* Anchored popouts (note-type creation, tag pop). */
-.pop-anchor { position: relative; display: inline-block; }
 .nt-pop .nt-cloze-row { align-items: center; }
-.nt-defs { display: flex; flex-direction: column; gap: 6px; }
-.nt-defs label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
 
 /* Note-editor preview modal: cards stacked, a bit wider than the default. */
 .ne-pv-row { display: flex; }

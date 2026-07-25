@@ -2413,41 +2413,28 @@ function renderNoteTypes() {
   state.card = null;
   const models = Object.values(state.col.models);
 
-  // "+ New" opens a popout panel (no native prompt/confirm popups): name,
-  // a Cloze? Yes/No toggle, and a default value per field (used to prefill
-  // the add-card editors for this note type).
+  // "+ New" opens a popout panel (no native prompt/confirm popups).
   const pop = el("div", { class: "pop-panel nt-pop" });
   pop.style.display = "none";
   const nameInp = el("input", { type: "text", placeholder: "Note type name" });
   let isCloze = false;
   const yesBtn = el("button", { type: "button", class: "tag-bub" }, "Yes");
-  const noBtn = el("button", { type: "button", class: "tag-bub" }, "No");
-  const defaultInputs = [];
-  const defaultsBox = el("div", { class: "nt-defs" });
-  const renderDefaults = () => {
-    // Same fields addNoteType creates: basicNoteType vs clozeNoteType.
-    const names = isCloze ? ["Text", "Back Extra"] : ["Front", "Back"];
-    const prev = defaultInputs.map((d) => d.value);
-    defaultInputs.length = 0;
-    defaultsBox.replaceChildren(...names.map((n, i) => {
-      const inp = el("input", { type: "text", placeholder: "(empty)", value: prev[i] ?? "" });
-      defaultInputs.push(inp);
-      return el("label", {}, n, inp);
-    }));
-    yesBtn.className = `tag-bub${isCloze ? " on" : ""}`;
-    noBtn.className = `tag-bub${isCloze ? "" : " on"}`;
-  };
-  yesBtn.addEventListener("click", () => { isCloze = true; renderDefaults(); });
-  noBtn.addEventListener("click", () => { isCloze = false; renderDefaults(); });
+  const noBtn = el("button", { type: "button", class: "tag-bub on" }, "No");
+  yesBtn.addEventListener("click", () => {
+    isCloze = true;
+    yesBtn.className = "tag-bub on";
+    noBtn.className = "tag-bub";
+  });
+  noBtn.addEventListener("click", () => {
+    isCloze = false;
+    yesBtn.className = "tag-bub";
+    noBtn.className = "tag-bub on";
+  });
   const closePop = () => { pop.style.display = "none"; };
   const create = async () => {
     const name = nameInp.value.trim();
     if (!name) { nameInp.focus(); return; }
     const nt = state.col.addNoteType(name, isCloze ? NoteTypeKind.Cloze : NoteTypeKind.Standard);
-    nt.flds.forEach((f, i) => {
-      const v = defaultInputs[i]?.value ?? "";
-      if (v) f.default = v; // native-format only; Anki ignores unknown keys
-    });
     await persistAll();
     renderEditNoteType(nt.id);
   };
@@ -2456,13 +2443,10 @@ function renderNoteTypes() {
     el("h3", {}, "New note type"),
     nameInp,
     el("div", { class: "row nt-cloze-row" }, el("span", { class: "muted" }, "Cloze?"), yesBtn, noBtn),
-    el("span", { class: "muted pop-src" }, "Default field values (prefill new cards):"),
-    defaultsBox,
     el("div", { class: "row" },
       el("button", { type: "button", onclick: create }, "Create"),
       el("button", { type: "button", onclick: closePop }, "Cancel")),
   );
-  renderDefaults();
   const add = el("button", {
     onclick: () => {
       pop.style.display = pop.style.display === "none" ? "" : "none";
@@ -2505,10 +2489,15 @@ function renderEditNoteType(mid) {
     fieldNameInputs.length = 0;
     fieldsBox.replaceChildren(...nt.flds.map((f, i) => {
       const inp = el("input", { type: "text", value: f.name });
-      fieldNameInputs.push({ ord: i, inp });
+      const def = el("input", {
+        type: "text", class: "nt-def", value: f.default ?? "",
+        placeholder: "default value (blank = none)",
+        title: "Default value: prefills this field's editor when adding a card of this type",
+      });
+      fieldNameInputs.push({ ord: i, inp, def });
       const rm = el("button", { class: "icon", title: "Remove field",
         onclick: async () => { state.col.removeField(mid, i); await persistAll(); renderEditNoteType(mid); } }, icon("trash"));
-      return el("div", { class: "nt-row" }, inp, nt.flds.length > 1 ? rm : "");
+      return el("div", { class: "nt-row" }, inp, def, nt.flds.length > 1 ? rm : "");
     }));
   };
   renderFields();
@@ -2535,7 +2524,12 @@ function renderEditNoteType(mid) {
 
   const save = async () => {
     nt.name = nameInput.value.trim() || nt.name;
-    for (const { ord, inp } of fieldNameInputs) state.col.renameField(mid, ord, inp.value);
+    for (const { ord, inp, def } of fieldNameInputs) {
+      state.col.renameField(mid, ord, inp.value);
+      const f = state.col.noteType(mid).flds[ord];
+      if (f && def.value) f.default = def.value;
+      else if (f) delete f.default; // keep the JSON clean when blank
+    }
     for (const { ord, name, qfmt, afmt } of tmplInputs) {
       state.col.setTemplate(mid, ord, { name: name.value, qfmt: qfmt.value, afmt: afmt.value });
     }
