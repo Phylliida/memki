@@ -498,14 +498,14 @@ function mdEditor(initial = "") {
   const redoBtn = tbBtn("↷", "Redo (Ctrl+Shift+Z)", () => jumpHistory(1));
   const toolbar = el("div", { class: "md-toolbar" },
     undoBtn, redoBtn,
-    tbBtn("B", "Bold: **text**", () => surround("**")),
-    tbBtn("I", "Italic: *text*", () => surround("*")),
-    tbBtn("S̶", "Strikethrough: ~~text~~", () => surround("~~")),
-    tbBtn("`", "Inline code: `text`", () => surround("`")),
+    tbBtn("B", "Bold selection: **text**", () => surround("**")),
+    tbBtn("I", "Italic selection: *text*", () => surround("*")),
+    tbBtn("S̶", "Strikethrough selection: ~~text~~", () => surround("~~")),
+    tbBtn("`", "Code selection: `text`", () => surround("`")),
     tbBtn("•", "Bullet list", () => linePrefix(() => "- ")),
     tbBtn("1.", "Numbered list", () => linePrefix((i) => `${i + 1}. `)),
     tbBtn("link", "Link: [text](url)", insertLink),
-    tbBtn("[…]", "Cloze (Ctrl+Shift+C)", wrapCloze),
+    tbBtn("[…]", "Cloze selection (Ctrl+Shift+C)", wrapCloze),
     tbBtn(icon("image"), "Insert image/audio/video (or drag & drop / paste)", pickMedia),
   );
   const wrap = el("div", { class: "md-wrap" }, toolbar, area);
