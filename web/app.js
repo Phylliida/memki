@@ -1212,10 +1212,6 @@ function renderAddCard() {
     el("div", { class: "form" },
       el("div", { class: "row" }, el("label", {}, "Note type", modelSel), el("label", {}, "Deck", deckSel)),
       fieldsWrap,
-      el("div", { class: "row" },
-        el("button", { onclick: renderImportCsv }, "Import CSV/TSV"),
-        el("button", { onclick: renderImageOcclusion }, "Image Occlusion"),
-      ),
       previewBox,
     ),
   );
