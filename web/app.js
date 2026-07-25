@@ -919,6 +919,14 @@ function noteTypeAndNote(card) {
   return { note, noteType };
 }
 
+/** The undo-last-answer button (disabled when there's nothing to undo). */
+function undoButton() {
+  return el("button", {
+    class: "icon", title: "Undo last answer (Ctrl+Z)",
+    disabled: state.lastAction ? null : "", onclick: doUndo,
+  }, "Undo");
+}
+
 function renderStudy() {
   const card = nextDueCard();
   state.card = card;
@@ -926,7 +934,10 @@ function renderStudy() {
   const back = el("div", { class: "crumbs", onclick: renderDecks }, "← Decks");
 
   if (!card) {
-    show(back, el("p", { class: "center" }, "All caught up — nothing due in this deck."));
+    // Undo stays reachable here too — you can grade the last due card and
+    // land on this screen.
+    show(back, el("p", { class: "center" }, "All caught up — nothing due in this deck."),
+      el("div", { class: "more-bar" }, undoButton()));
     return;
   }
   const { note, noteType } = noteTypeAndNote(card);
@@ -1003,7 +1014,6 @@ async function gradeCard(rating) {
   });
   snapshot.entryId = entry.id;
   state.lastAction = snapshot;
-  updateUndoButton();
   // Persist the answered card AND its (possibly buried) siblings; the note too,
   // since a leech may have just been tagged.
   for (const c of state.col.cardsForNote(card.nid)) await putCard(state.db, c);
@@ -1011,11 +1021,6 @@ async function gradeCard(rating) {
   await putRevlog(state.db, entry);
   await putMeta(state.db, state.col); // persist deck daily counters (newToday/revToday)
   renderStudy();
-}
-
-function updateUndoButton() {
-  const btn = document.getElementById("btn-undo");
-  if (btn) btn.disabled = !state.lastAction;
 }
 
 async function doUndo() {
@@ -1032,7 +1037,6 @@ async function doUndo() {
     if (state.col.decks[id]) Object.assign(state.col.decks[id], counters);
   }
   state.lastAction = null;
-  updateUndoButton();
   if (card) for (const c of state.col.cardsForNote(card.nid)) await putCard(state.db, c);
   await deleteRevlog(state.db, a.entryId);
   await putMeta(state.db, state.col);
@@ -2248,6 +2252,7 @@ function reviewMoreBar() {
     renderStudy();
   };
   return el("div", { class: "more-bar" },
+    undoButton(),
     el("button", { class: "icon", onclick: () => renderEditNote(note.id) }, icon("pencil"), " Edit"),
     el("button", { class: "icon", onclick: () => act((s, c) => s.buryCard(c)) }, "Bury"),
     el("button", { class: "icon", onclick: () => act((s, c) => s.suspend(c)) }, "Suspend"),
@@ -2746,7 +2751,6 @@ function wireHeader() {
   document.getElementById("btn-browse").addEventListener("click", () => renderBrowse());
   document.getElementById("btn-stats").addEventListener("click", renderStats);
   document.getElementById("btn-types").addEventListener("click", renderNoteTypes);
-  document.getElementById("btn-undo").addEventListener("click", doUndo);
   const fileInput = document.getElementById("file-import");
   document.getElementById("btn-import").addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", () => {
