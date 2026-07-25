@@ -1059,9 +1059,10 @@ function addNoteWithCards(model, fields, did, tags = []) {
 
 /**
  * Tag toggle bubbles shared by the add-card and edit-note screens: one bubble
- * per tag in the collection, toggled in the `selected` set; "+ New tag" opens
- * a small popout. `onChange` is awaited after every change (edit-note uses it
- * to persist; add-card passes none and applies the set on Save).
+ * per tag in the collection (or, past 10 tags, selected bubbles plus a search
+ * field for finding the rest), toggled in the `selected` set; "+ New tag"
+ * opens a small popout. `onChange` is awaited after every change (edit-note
+ * uses it to persist; add-card passes none and applies the set on Save).
  */
 function tagBubblePicker(selected, onChange) {
   const box = el("div", { class: "tag-bubbles" });
@@ -1090,21 +1091,38 @@ function tagBubblePicker(selected, onChange) {
     for (const n of state.col.notes.values()) for (const t of n.tags) s.add(t);
     return [...s].sort((a, b) => a.localeCompare(b));
   };
+  // Up to 10 tags: one bubble each. Past that, bubbles would swamp the form —
+  // show the selected ones plus a search field for finding the rest.
+  const MAX_BUBBLES = 10;
+  const search = el("input", { type: "text", class: "tag-search", placeholder: "Search tags…" });
+  search.addEventListener("input", refresh);
   const refresh = () => {
+    const tags = allTags();
+    const bubble = (t, on) => el("button", {
+      type: "button", class: `tag-bub${on ? " on" : ""}`,
+      onclick: async () => {
+        if (selected.has(t)) selected.delete(t); else selected.add(t);
+        await onChange?.();
+        refresh();
+      },
+    }, t);
+    const newTagBtn = el("button", { type: "button", class: "tag-bub ghost", onclick: () => {
+      pop.style.display = pop.style.display === "none" ? "" : "none";
+      if (pop.style.display === "") inp.focus();
+    } }, "+ New tag");
+    if (tags.length <= MAX_BUBBLES) {
+      box.replaceChildren(...tags.map((t) => bubble(t, selected.has(t))), newTagBtn, pop);
+      return;
+    }
+    const q = search.value.trim().toLowerCase();
+    const matches = q
+      ? tags.filter((t) => !selected.has(t) && t.toLowerCase().includes(q)).slice(0, MAX_BUBBLES)
+      : [];
     box.replaceChildren(
-      ...allTags().map((t) =>
-        el("button", {
-          type: "button", class: `tag-bub${selected.has(t) ? " on" : ""}`,
-          onclick: async () => {
-            if (selected.has(t)) selected.delete(t); else selected.add(t);
-            await onChange?.();
-            refresh();
-          },
-        }, t)),
-      el("button", { type: "button", class: "tag-bub ghost", onclick: () => {
-        pop.style.display = pop.style.display === "none" ? "" : "none";
-        if (pop.style.display === "") inp.focus();
-      } }, "+ New tag"),
+      ...tags.filter((t) => selected.has(t)).map((t) => bubble(t, true)),
+      search,
+      ...matches.map((t) => bubble(t, false)),
+      newTagBtn,
       pop,
     );
   };
