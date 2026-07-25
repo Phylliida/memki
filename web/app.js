@@ -281,27 +281,39 @@ function mdEditor(initial = "") {
     return [offsetAt(r.startContainer, r.startOffset), offsetAt(r.endContainer, r.endOffset)];
   };
 
-  /** Place the caret at a source offset (clamped; widgets are skipped over). */
-  const restoreCaret = (off) => {
-    let acc = 0, target = null, tOff = 0;
+  /** DOM position for a source offset (clamped; widgets are skipped over). */
+  const positionAt = (off) => {
+    let acc = 0, found = null;
     const walk = (node) => {
       for (const ch of node.childNodes) {
         const len = measure(ch);
-        if (!target && off <= acc + len) {
-          if (ch.nodeType === Node.TEXT_NODE) { target = ch; tOff = Math.max(0, off - acc); return; }
-          if (ch.dataset?.token == null && ch.tagName !== "BR") { walk(ch); if (target) return; }
+        if (!found && off <= acc + len) {
+          if (ch.nodeType === Node.TEXT_NODE) { found = { node: ch, off: Math.max(0, off - acc) }; return; }
+          if (ch.dataset?.token == null && ch.tagName !== "BR") { walk(ch); if (found) return; }
         }
         acc += len;
       }
     };
     walk(area);
+    if (found) found.off = Math.min(found.off, found.node.data.length);
+    return found;
+  };
+
+  /** Select the source range [s, e] in the DOM (collapsed caret when s = e). */
+  const setDomSelection = (s, e = s) => {
     const sel = window.getSelection();
     sel.removeAllRanges();
     const r = document.createRange();
-    if (target) r.setStart(target, Math.min(tOff, target.data.length));
+    const ps = positionAt(s);
+    const pe = positionAt(e);
+    if (ps) r.setStart(ps.node, ps.off);
     else { r.selectNodeContents(area); r.collapse(false); }
+    if (pe) r.setEnd(pe.node, pe.off);
     sel.addRange(r);
   };
+
+  /** Place the caret at a source offset. */
+  const restoreCaret = (off) => setDomSelection(off, off);
 
   // --- undo/redo: our own history (native contenteditable undo is unreliable
   // across the programmatic widget re-renders). Snapshots are { src, caret };
@@ -375,12 +387,20 @@ function mdEditor(initial = "") {
 
   // --- formatting actions (operate on the source string) ---
 
+  /** Wrap the selection as pre + selection + post. Stateless: with no
+   * selection the buttons do nothing (no "bold mode" for future typing). */
   const surround = (pre, post = pre) => {
     const src = serialize();
-    const [s, e] = selOffsets() ?? [src.length, src.length];
+    const sel = selOffsets();
+    if (!sel || sel[0] === sel[1]) {
+      setStatus("Select text first — formatting buttons apply to the selection.");
+      return;
+    }
+    const [s, e] = sel;
     const inner = src.slice(s, e);
-    setSource(src.slice(0, s) + pre + inner + post + src.slice(e),
-      inner ? e + pre.length + post.length : s + pre.length);
+    setSource(src.slice(0, s) + pre + inner + post + src.slice(e));
+    area.focus();
+    setDomSelection(s, e + pre.length + post.length); // show what was wrapped
   };
 
   const linePrefix = (mk) => {
@@ -403,7 +423,12 @@ function mdEditor(initial = "") {
 
   const insertLink = () => {
     const src = serialize();
-    const [s, e] = selOffsets() ?? [src.length, src.length];
+    const sel = selOffsets();
+    if (!sel || sel[0] === sel[1]) {
+      setStatus("Select the link text first (a pasted URL links on its own).");
+      return;
+    }
+    const [s, e] = sel;
     const text = src.slice(s, e);
     const url = prompt("Link URL:", "https://");
     if (!url) return;
