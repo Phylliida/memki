@@ -2576,7 +2576,9 @@ function renderEditNoteType(mid) {
 
   show(
     el("div", { class: "crumbs", onclick: renderNoteTypes }, "← Note types"),
-    el("h2", {}, `Edit note type${isCloze ? " (Cloze)" : ""}`),
+    el("div", { class: "add-head" },
+      el("h2", {}, `Edit note type${isCloze ? " (Cloze)" : ""}`),
+      el("div", { class: "add-actions" }, el("button", { onclick: save }, "Save"))),
     el("div", { class: "form" },
       el("label", {}, "Name", nameInput),
       el("h3", {}, "Fields"), fieldsBox,
@@ -2592,7 +2594,6 @@ function renderEditNoteType(mid) {
         await persistAll(); renderEditNoteType(mid);
       } }, "+ Template"),
       el("h3", {}, "Styling (CSS)"), cssArea,
-      el("div", { class: "row" }, el("button", { onclick: save }, "Save")),
       previewBox,
     ),
   );

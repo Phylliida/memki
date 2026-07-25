@@ -330,8 +330,9 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 .tag-lbl { font-size: 14px; }
 .tag-search { width: 150px; }
 
-/* Add-card header: title left, tag/flag toggles + Save top-right. */
-.add-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+/* Add-card / edit-note-type header: title left, Save top-right — capped to
+   the .form column so the button's right edge aligns with the fields'. */
+.add-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; max-width: 900px; }
 .add-head h2 { margin: 0; }
 .add-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; justify-content: flex-end; }
 .add-actions .form-tags { flex-direction: row; align-items: center; flex-wrap: wrap; }
