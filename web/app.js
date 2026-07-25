@@ -1095,7 +1095,6 @@ function tagBubblePicker(selected, onChange) {
   // show the selected ones plus a search field for finding the rest.
   const MAX_BUBBLES = 10;
   const search = el("input", { type: "text", class: "tag-search", placeholder: "Search tags…" });
-  search.addEventListener("input", refresh);
   const refresh = () => {
     const tags = allTags();
     const bubble = (t, on) => el("button", {
@@ -1126,6 +1125,7 @@ function tagBubblePicker(selected, onChange) {
       pop,
     );
   };
+  search.addEventListener("input", refresh);
   refresh();
   return box;
 }
