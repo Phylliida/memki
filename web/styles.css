@@ -217,6 +217,10 @@ a.hint { display: inline-block; color: var(--accent); }
 .nt-tmpl-head { display: flex; gap: 8px; align-items: center; }
 .nt-tmpl-head input { flex: 1; font-weight: 600; }
 .form label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
+/* Field rows around the markdown editor. NOT a <label>: clicking inside a
+   label activates its first labelable control — which would be the first
+   toolbar button (it "auto-bolded" before this was a div). */
+.form .fld { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
 .form input, .form textarea, .form select {
   background: var(--panel-2); color: var(--text);
   border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 15px; font-family: inherit;

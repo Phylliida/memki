@@ -1074,7 +1074,7 @@ function renderAddCard() {
     fieldsWrap.replaceChildren(...model.flds.map((f) => {
       const ed = mdEditor("");
       inputs.push(ed);
-      return el("label", {}, f.name, ed.el);
+      return el("div", { class: "fld" }, el("span", {}, f.name), ed.el);
     }));
   };
 
@@ -1775,7 +1775,7 @@ function noteEditorForm(noteId, cb = {}) {
 
   const cardCount = state.col.cardsForNote(noteId).length;
   const fieldsBox = el("div", { class: "form ne-fields" },
-    ...inputs.map(({ f, ed }) => el("label", {}, f.name, ed.el)));
+    ...inputs.map(({ f, ed }) => el("div", { class: "fld" }, el("span", {}, f.name), ed.el)));
   fieldsBox.addEventListener("input", (e) => { if (!isMediaEvent(e)) scheduleSave(); });
   fieldsBox.addEventListener("focusout", () => {
     if (saveTimer) { clearTimeout(saveTimer); doSave(); }
