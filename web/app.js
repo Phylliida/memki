@@ -835,7 +835,10 @@ function renderCustomStudy(sourceDeckId) {
   const field = (label, input, info) => {
     if (!info) return el("label", {}, label, input);
     const { btn, tip } = infoBubble(info);
-    return el("label", {}, el("span", { class: "lbl-row" }, label, btn), tip, input);
+    // Not a <label>: the info button is the first labelable element, so
+    // clicking the label text would toggle the bubble instead of focusing
+    // the input.
+    return el("div", { class: "fld" }, el("span", { class: "lbl-row" }, label, btn), tip, input);
   };
   show(
     el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
@@ -1955,7 +1958,10 @@ function renderDeckOptions(deckId) {
   const field = (label, input, info) => {
     if (!info) return el("label", {}, label, input);
     const { btn, tip } = infoBubble(info);
-    return el("label", {}, el("span", { class: "lbl-row" }, label, btn), tip, input);
+    // Not a <label>: the info button is the first labelable element, so
+    // clicking the label text would toggle the bubble instead of focusing
+    // the input.
+    return el("div", { class: "fld" }, el("span", { class: "lbl-row" }, label, btn), tip, input);
   };
   const inline = (chk, text, info) => {
     const lab = el("label", { class: "inline" }, chk, text);

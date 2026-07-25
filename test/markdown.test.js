@@ -81,3 +81,27 @@ test("scanMdMedia finds image and sound tokens with offsets", () => {
   // every raw token re-renders to the same HTML mdToHtml would produce
   for (const t of toks) assert.ok(mdToHtml(t.raw).length > 0);
 });
+
+test("$ and $$ math normalize to MathJax delimiters", () => {
+  assert.equal(mdToHtml("$x_i$ and $y_j$"), "\\(x_i\\) and \\(y_j\\)");
+  assert.equal(mdToHtml("$$E = mc^2$$"), "\\[E = mc^2\\]");
+});
+
+test("currency is not math (pandoc rules)", () => {
+  assert.equal(mdToHtml("$5 and $10"), "$5 and $10");
+  assert.equal(mdToHtml("costs $5"), "costs $5");
+  assert.equal(mdToHtml("$ x$ and $x $"), "$ x$ and $x $"); // spaces inside: not math
+});
+
+test("fenced code blocks are syntax-highlighted", () => {
+  const out = mdToHtml("```js\nconst x = 1;\n```");
+  assert.match(out, /^<pre><code class="hljs language-js">/);
+  assert.match(out, /hljs-keyword/);
+});
+
+test("unknown or missing language renders plain escaped code", () => {
+  assert.equal(mdToHtml("```nosuchlang\na < b\n```"),
+    '<pre><code class="language-nosuchlang">a &lt; b</code></pre>\n');
+  assert.equal(mdToHtml("```\na < b\n```"),
+    "<pre><code>a &lt; b</code></pre>\n");
+});

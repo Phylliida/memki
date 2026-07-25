@@ -8,6 +8,10 @@
 //
 //   - math spans are protected so `_` / `*` in LaTeX never become emphasis:
 //       \(..\) \[..\] [latex]..[/latex] [$]..[/$] [$$]..[/$$]
+//     and $inline$ / $$display$$ are accepted too, normalized to \( .. \) /
+//     \[ .. \] so they typeset with MathJax here AND render in Anki on export
+//   - fenced code blocks with a language are syntax-highlighted (vendored
+//     highlight.js, theme in vendor/highlight-theme.css)
 //   - [sound:name] is protected (otherwise it parses as a reference link, and
 //     underscores in two filenames on one line would pair up as emphasis)
 //   - images support a sizing extension: ![alt](name){width=200} — the editor
@@ -20,6 +24,7 @@
 //   - GFM is on (tables, strikethrough, autolinks)
 
 import { Marked } from "../vendor/marked.esm.js";
+import hljs from "../vendor/highlight.esm.js";
 
 // --- raw passthrough tokenizers (math, sound) ---
 
@@ -42,6 +47,30 @@ const mathTokens = [
   rawToken("mathBracket", /^\\\[([\s\S]+?)\\\]/, (s) => s.indexOf("\\[")),
   // inline math \( .. \)
   rawToken("mathParen", /^\\\(([\s\S]+?)\\\)/, (s) => s.indexOf("\\(")),
+  // $$ .. $$ → normalized to \[ .. \] (MathJax / Anki display-math delimiters)
+  {
+    name: "mathDollarDisplay",
+    level: "inline",
+    start(src) { return src.indexOf("$$"); },
+    tokenizer(src) {
+      const m = /^\$\$([\s\S]+?)\$\$/.exec(src);
+      if (m) return { type: "mathDollarDisplay", raw: m[0], text: m[1] };
+    },
+    renderer(token) { return `\\[${token.text}\\]`; },
+  },
+  // $ .. $ → normalized to \( .. \). Pandoc's rules keep currency safe: no
+  // space just inside the delimiters, and the closing $ isn't followed by a
+  // digit ("$5 and $10" stays text).
+  {
+    name: "mathDollarInline",
+    level: "inline",
+    start(src) { return src.indexOf("$"); },
+    tokenizer(src) {
+      const m = /^\$([^\s$](?:[^$]*[^\s$])?)\$(?!\d)/.exec(src);
+      if (m) return { type: "mathDollarInline", raw: m[0], text: m[1] };
+    },
+    renderer(token) { return `\\(${token.text}\\)`; },
+  },
   // Anki [latex]..[/latex]
   rawToken("mathLatex", /^\[latex\]([\s\S]+?)\[\/latex\]/i, (s) => s.toLowerCase().indexOf("[latex]")),
   // Anki [$$]..[/$$]
@@ -80,6 +109,26 @@ const imgSizeToken = {
 
 const md = new Marked({ breaks: true, gfm: true });
 md.use({ extensions: [...mathTokens, imgSizeToken] });
+
+// Fenced code blocks with a language get highlight.js spans; unknown or
+// missing languages render as plain escaped code (marked's default shape).
+const escapeCode = (s) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+md.use({
+  renderer: {
+    code({ text, lang }) {
+      const language = (lang ?? "").trim().split(/\s/)[0].toLowerCase();
+      if (language && hljs.getLanguage(language)) {
+        try {
+          const value = hljs.highlight(text, { language }).value;
+          return `<pre><code class="hljs language-${language}">${value}</code></pre>\n`;
+        } catch { /* fall through to plain */ }
+      }
+      const cls = language ? ` class="language-${language}"` : "";
+      return `<pre><code${cls}>${escapeCode(text)}</code></pre>\n`;
+    },
+  },
+});
 
 /**
  * Render a field's markdown source to HTML. Inline/block HTML passes through;
