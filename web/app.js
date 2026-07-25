@@ -129,11 +129,17 @@ function sanitizeCurModel(col) {
 // source text; serialization swaps them back, so getText() always returns
 // markdown source. Tokens whose media isn't in the store stay plain text.
 //
-// Known limitation: browser-native undo (Ctrl+Z) is unreliable across the
-// programmatic widget re-renders; note History provides real undo.
+// Undo/redo is our own snapshot stack (native contenteditable undo is
+// unreliable across the programmatic widget re-renders): Ctrl+Z /
+// Ctrl+Shift+Z / Ctrl+Y, or the ↶ ↷ toolbar buttons. For longer time travel
+// there's the note-level History modal.
 
 function tbBtn(label, title, onClick) {
-  return el("button", { type: "button", class: "md-tb", title, onclick: (e) => { e.preventDefault(); onClick(); } }, label);
+  const b = el("button", { type: "button", class: "md-tb", title, onclick: (e) => { e.preventDefault(); onClick(); } }, label);
+  // Don't let the button take focus — the field selection must survive so
+  // formatting actions apply to it.
+  b.addEventListener("mousedown", (e) => e.preventDefault());
+  return b;
 }
 
 /** Store a dropped/pasted file in the media store; returns its media name. */
@@ -297,10 +303,50 @@ function mdEditor(initial = "") {
     sel.addRange(r);
   };
 
+  // --- undo/redo: our own history (native contenteditable undo is unreliable
+  // across the programmatic widget re-renders). Snapshots are { src, caret };
+  // typing is coalesced with a short debounce, while toolbar/media actions
+  // commit immediately before and after, so each action is one undo step. ---
+
+  const hist = { stack: [{ src: initial, caret: initial.length }], i: 0 };
+  const HIST_MAX = 200;
+
+  function updateUndoButtons() {
+    undoBtn.disabled = hist.i <= 0;
+    redoBtn.disabled = hist.i >= hist.stack.length - 1;
+  }
+
+  /** Push the current state if it differs from the top; drops the redo tail. */
+  const commitHistory = () => {
+    const src = serialize();
+    if (src === hist.stack[hist.i].src) return;
+    hist.stack.length = hist.i + 1;
+    hist.stack.push({ src, caret: selOffsets()?.[0] ?? src.length });
+    if (hist.stack.length > HIST_MAX) hist.stack.shift();
+    hist.i = hist.stack.length - 1;
+    updateUndoButtons();
+  };
+  const scheduleCommit = debounced(commitHistory, 400);
+
+  const jumpHistory = (d) => {
+    commitHistory(); // capture in-progress typing before leaving this state
+    const j = hist.i + d;
+    if (j < 0 || j >= hist.stack.length) return;
+    hist.i = j;
+    const { src, caret } = hist.stack[j];
+    render(src);
+    area.focus();
+    restoreCaret(Math.min(caret, src.length));
+    area.dispatchEvent(new Event("input", { bubbles: true })); // autosave/preview
+    updateUndoButtons();
+  };
+
   /** Re-render from a new source; restores the caret and notifies listeners. */
-  const setSource = (src, caret = null) => {
+  const setSource = (src, caret = null, { record = true } = {}) => {
+    if (record) commitHistory(); // flush the pre-action state (incl. pending typing)
     render(src);
     if (caret != null) { area.focus(); restoreCaret(caret); }
+    if (record) commitHistory(); // and the post-action state as its own step
     area.dispatchEvent(new Event("input", { bubbles: true }));
   };
 
@@ -323,7 +369,7 @@ function mdEditor(initial = "") {
   };
   const scheduleRetokenize = debounced(retokenize, 250);
   area.addEventListener("input", (e) => {
-    if (!isMediaEvent(e)) scheduleRetokenize();
+    if (!isMediaEvent(e)) { scheduleRetokenize(); scheduleCommit(); }
     if (sizingImg) positionHandle();
   });
 
@@ -373,7 +419,14 @@ function mdEditor(initial = "") {
   // --- keyboard, drag & drop, paste ---
 
   area.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "c") {
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && !e.shiftKey && e.key.toLowerCase() === "z") { e.preventDefault(); jumpHistory(-1); return; }
+    if (mod && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) {
+      e.preventDefault();
+      jumpHistory(1);
+      return;
+    }
+    if (mod && e.shiftKey && e.key.toLowerCase() === "c") {
       e.preventDefault();
       wrapCloze();
       return;
@@ -416,7 +469,10 @@ function mdEditor(initial = "") {
     inp.addEventListener("change", () => { if (inp.files[0]) insertMedia(inp.files[0]); });
     inp.click();
   };
+  const undoBtn = tbBtn("↶", "Undo (Ctrl+Z)", () => jumpHistory(-1));
+  const redoBtn = tbBtn("↷", "Redo (Ctrl+Shift+Z)", () => jumpHistory(1));
   const toolbar = el("div", { class: "md-toolbar" },
+    undoBtn, redoBtn,
     tbBtn("B", "Bold: **text**", () => surround("**")),
     tbBtn("I", "Italic: *text*", () => surround("*")),
     tbBtn("S̶", "Strikethrough: ~~text~~", () => surround("~~")),
@@ -504,11 +560,18 @@ function mdEditor(initial = "") {
   });
 
   render(initial);
+  updateUndoButtons();
 
   return {
     el: wrap,
     getText: () => serialize(),
-    setText: (t) => { hideHandle(); render(t ?? ""); },
+    setText: (t) => {
+      hideHandle();
+      render(t ?? "");
+      hist.stack = [{ src: t ?? "", caret: (t ?? "").length }];
+      hist.i = 0;
+      updateUndoButtons();
+    },
     focus: () => area.focus(),
   };
 }
