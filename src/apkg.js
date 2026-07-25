@@ -29,6 +29,7 @@ import {
 } from "./model.js";
 import { joinFields, fieldChecksum, sortField } from "./text.js";
 import { mdToHtml } from "./markdown.js";
+import { htmlFieldToMd } from "./html-to-md.js";
 
 /**
  * A note's export row: fields rendered markdown→HTML with sfld/csum recomputed
@@ -303,7 +304,17 @@ export function importPackage(bytes, { SQL } = {}) {
   const files = unzipSync(bytes);
   const db = new SQL.Database(extractCollectionDb(files));
   try {
-    return { collection: readCollection(db), media: readMedia(files) };
+    const collection = readCollection(db);
+    // Anki fields are HTML; convert to our markdown-native fields (and
+    // recompute the derived sfld/csum on the converted text).
+    for (const note of collection.notes.values()) {
+      const converted = note.fields.map(htmlFieldToMd);
+      if (converted.some((f, i) => f !== note.fields[i])) {
+        note.fields = converted;
+        note.normalize(collection.noteType(note.mid)?.sortf ?? 0);
+      }
+    }
+    return { collection, media: readMedia(files) };
   } finally {
     db.close();
   }

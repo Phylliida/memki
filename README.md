@@ -55,9 +55,11 @@ share decks with Anki users.
 **Fields are markdown source.** Cards render them through marked (with math,
 `[sound:]`, and image `{width=N}` extensions) at display time, and `.apkg`
 export converts every field to HTML with recomputed `sfld`/`csum`, so Anki
-receives its native format. Inline/block HTML passes the renderer unchanged,
-so notes written before this change (or imported from Anki) keep working —
-editing one simply shows its HTML source in the markdown editor.
+receives its native format. In the other direction, HTML fields are converted
+to markdown with turndown — on `.apkg` import and via a one-time migration of
+existing collections on app load — so every note is markdown-mode. (The
+HTML→markdown step is lossy for styled markup like colors and font tags;
+math, `[sound:]`, cloze markers, and image widths are preserved.)
 
 ## Run the app
 

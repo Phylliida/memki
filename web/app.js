@@ -2681,6 +2681,9 @@ async function doRestore(file) {
     const { collectionFromBackup } = await import("../src/backup.js");
     const { collection, media } = collectionFromBackup(JSON.parse(await file.text()));
     if (!confirm(`Restore this backup (${collection.cards.size} cards, ${media.size} media files)?\n\nThis REPLACES your current collection.`)) return;
+    // Backups from before fields went markdown-native may hold HTML fields.
+    const { migrateCollectionToMarkdown } = await import("../src/html-to-md.js");
+    migrateCollectionToMarkdown(collection);
     sanitizeCurModel(collection);
     state.col = collection;
     state.media = media;
@@ -2791,6 +2794,13 @@ async function init() {
   }
   state.media = await loadMedia(state.db);
   sanitizeCurModel(state.col); // a stale curModel (e.g. from an import) would break Add Card
+  // One-time migration: convert any legacy HTML fields to markdown.
+  const { migrateCollectionToMarkdown } = await import("../src/html-to-md.js");
+  const migrated = migrateCollectionToMarkdown(state.col);
+  if (migrated > 0) {
+    await saveCollection(state.db, state.col);
+    setStatus(`Converted ${migrated} note${migrated > 1 ? "s" : ""} to markdown.`);
+  }
   // New-day maintenance: un-bury yesterday's buried siblings, then persist.
   if (new Scheduler(state.col).unburyForNewDay() > 0) {
     await saveCollection(state.db, state.col);

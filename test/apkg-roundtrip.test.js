@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import { importPackage, exportPackage } from "../src/apkg.js";
 import { initSqlJsNode } from "../src/sqljs-node.js";
+import { unzipSync } from "fflate";
 import { Collection, Note, Card, NoteTypeKind, writeCardFlags } from "../src/model.js";
 import { fieldChecksum } from "../src/text.js";
 
@@ -89,13 +90,19 @@ test("markdown fields export as HTML with recomputed csum/sfld", () => {
   col.addCard(new Card({ nid: note.id, did: 1 }));
 
   const out = exportPackage(col, new Map(), { SQL });
-  const back = [...importPackage(out, { SQL }).collection.notes.values()][0];
 
-  // The package holds rendered HTML; checksums are computed on that HTML
-  // (Anki-consistent), not on the markdown source.
-  assert.deepEqual(back.fields, ["<strong>Capital</strong> of France?", "Paris"]);
-  assert.equal(back.sfld, "Capital of France?");
-  assert.equal(back.csum, fieldChecksum("<strong>Capital</strong> of France?"));
+  // The package itself holds rendered HTML; checksums are computed on that
+  // HTML (Anki-consistent), not on the markdown source. Read the raw SQLite.
+  const db = new SQL.Database(unzipSync(out)["collection.anki2"]);
+  const [flds, sfld, csum] = db.exec("select flds, sfld, csum from notes")[0].values[0];
+  db.close();
+  assert.equal(flds, "<strong>Capital</strong> of France?\x1fParis");
+  assert.equal(sfld, "Capital of France?");
+  assert.equal(csum, fieldChecksum("<strong>Capital</strong> of France?"));
+
+  // Re-importing converts back to the same markdown (stable round trip).
+  const back = [...importPackage(out, { SQL }).collection.notes.values()][0];
+  assert.deepEqual(back.fields, ["**Capital** of France?", "Paris"]);
 });
 
 test("field default values round-trip through export (unknown key tolerated)", () => {
