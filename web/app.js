@@ -1830,48 +1830,48 @@ function noteEditorForm(noteId, cb = {}) {
     ...inputs.map(({ f, ed }) => el("div", { class: "fld" }, el("span", {}, f.name), ed.el)));
   fieldsBox.addEventListener("input", (e) => {
     if (!isMediaEvent(e)) scheduleSave();
-    if (pvPop.style.display !== "none") schedulePvPop();
+    if (pvBox) schedulePvPop();
   });
   fieldsBox.addEventListener("focusout", () => {
     if (saveTimer) { clearTimeout(saveTimer); doSave(); }
   });
 
-  // Preview popout: the note's first card rendered front + back through the
-  // real pipeline (same as the add-card preview), live-updated while open.
-  const pvPop = el("div", { class: "pop-panel ne-pv-pop" });
-  pvPop.style.display = "none";
+  // Preview modal (centered, like Change note type): the note's first card
+  // rendered front + back through the real pipeline, live-updated while open.
+  let pvBox = null; // content container while the modal is open
   const updatePvPop = () => {
+    if (!pvBox) return;
     if (model.ossIO) {
       // Image occlusion notes render their own face (fields are image + mask
       // JSON, edited by the occlusion tool — preview the saved note).
-      pvPop.replaceChildren(occlusionFace(note, 0, "q"));
-      wireSoundVolumes(pvPop);
+      pvBox.replaceChildren(occlusionFace(note, 0, "q"));
+      wireSoundVolumes(pvBox);
       return;
     }
     const fields = inputs.map(({ ed }) => ed.getText());
     const tmpNote = new Note({ mid: model.id, fields, tags: [...noteTags] });
     const ords = cardOrdinalsForNote(model, tmpNote);
     if (!ords.length) {
-      pvPop.replaceChildren(el("div", { class: "muted pv-count" }, "No cards — fill the first field."));
+      pvBox.replaceChildren(el("div", { class: "muted pv-count" }, "No cards — fill the first field."));
       return;
     }
     applyModelCss(model);
     const deckName = state.col.decks[String(state.col.cardsForNote(note.id)[0]?.did ?? 1)]?.name ?? "";
     const { question, answer } = renderCard(model, ords[0], tmpNote, { deckName });
-    pvPop.replaceChildren(
+    pvBox.replaceChildren(
       el("div", { class: "muted pv-count" },
         `Previewing "${model.tmpls[model.type === NoteTypeKind.Cloze ? 0 : ords[0]]?.name ?? ""}"`),
       el("div", { class: "card-face pv" }, el("div", { class: "card", html: displayHtml(question) })),
       el("div", { class: "card-face pv" }, el("div", { class: "card", html: displayHtml(answer) })),
     );
-    wireSoundVolumes(pvPop);
+    wireSoundVolumes(pvBox);
     typesetMath();
   };
   const schedulePvPop = debounced(updatePvPop);
   const pvBtn = el("button", { type: "button", onclick: () => {
-    const opening = pvPop.style.display === "none";
-    pvPop.style.display = opening ? "" : "none";
-    if (opening) updatePvPop();
+    pvBox = el("div", { class: "ne-pv-modal" });
+    openModal([el("h3", {}, "Preview"), pvBox], { onClose: () => { pvBox = null; } });
+    updatePvPop();
   } }, "Preview");
 
   const refresh = () => (cb.onCardsChanged ?? cb.onAutoSaved ?? (() => {}))();
@@ -1879,7 +1879,7 @@ function noteEditorForm(noteId, cb = {}) {
   return el("div", { class: "form note-editor" },
     el("div", { class: "muted ne-head" },
       `${model.name} · ${cardCount} card${cardCount === 1 ? "" : "s"} share this note · edits save automatically`),
-    el("div", { class: "ne-pv-row" }, el("span", { class: "pop-anchor" }, pvBtn, pvPop)),
+    el("div", { class: "ne-pv-row" }, pvBtn),
     fieldsBox,
     el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Tags"), tagBox),
     el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Flags"),

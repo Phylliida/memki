@@ -299,10 +299,10 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 .nt-defs { display: flex; flex-direction: column; gap: 6px; }
 .nt-defs label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
 
-/* Note-editor preview popout: wider so the cards are legible, stacked. */
+/* Note-editor preview modal: cards stacked, a bit wider than the default. */
 .ne-pv-row { display: flex; }
-.ne-pv-pop { width: 560px; left: 0; right: auto; gap: 10px; }
-.ne-pv-pop .card-face { margin: 0; }
+.ne-pv-modal { display: flex; flex-direction: column; gap: 10px; min-width: min(560px, calc(100vw - 100px)); }
+.ne-pv-modal .card-face { margin: 0; }
 
 /* Flag bubbles (immediate set; one flag per card) */
 .flag-picker { display: inline-flex; gap: 4px; align-items: center; }
