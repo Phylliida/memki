@@ -153,3 +153,36 @@ test("filter chains apply right-to-left", () => {
   const out = renderTemplate("{{text:cloze:T}}", { fields, clozeOrd: 1, side: "a" });
   assert.equal(out, "word");
 });
+
+// --- markdown fields (converted to HTML inside renderCard) ---
+
+test("renderCard converts markdown fields to HTML", () => {
+  const nt = basicNoteType(21);
+  const note = new Note({ mid: 21, fields: ["**bold** front", "answer *em*"] });
+  const { question, answer } = renderCard(nt, 0, note);
+  assert.equal(question, "<strong>bold</strong> front");
+  assert.match(answer, /answer <em>em<\/em>$/);
+});
+
+test("markdown inside a cloze renders within the cloze span", () => {
+  const nt = clozeNoteType(22);
+  const note = new Note({ mid: 22, fields: ["The {{c1::**cat**}} sat", ""] });
+  const c = renderCard(nt, 0, note);
+  assert.match(c.question, /<span class="cloze" data-ordinal="1">\[\.\.\.\]<\/span>/);
+  assert.match(c.answer, /<span class="cloze" data-ordinal="1"><strong>cat<\/strong><\/span>/);
+});
+
+test("{{type:Field}} compares against markdown-stripped text", () => {
+  const nt = basicNoteType(23);
+  nt.tmpls[0].qfmt = "{{type:Back}}";
+  nt.tmpls[0].afmt = "{{type:Back}}";
+  const note = new Note({ mid: 23, fields: ["Q", "**Paris**, France"] });
+  const a = renderCard(nt, 0, note, { typed: "Paris, France" });
+  assert.match(a.answer, /<span class=typeGood>Paris, France<\/span>/);
+});
+
+test("math and [sound:] in fields pass through markdown untouched", () => {
+  const nt = basicNoteType(24);
+  const note = new Note({ mid: 24, fields: ["\\(x_i\\) [sound:snd_1.mp3]", "A"] });
+  assert.equal(renderCard(nt, 0, note).question, "\\(x_i\\) [sound:snd_1.mp3]");
+});

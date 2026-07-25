@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { importPackage, exportPackage } from "../src/apkg.js";
 import { initSqlJsNode } from "../src/sqljs-node.js";
 import { Collection, Note, Card } from "../src/model.js";
+import { fieldChecksum } from "../src/text.js";
 
 const SQL = await initSqlJsNode();
 const fixture = fileURLToPath(new URL("./fixtures/Ukulele_Chords.apkg", import.meta.url));
@@ -78,4 +79,21 @@ test("a from-scratch collection exports and re-imports", () => {
   assert.deepEqual(back.tags, ["geo"]);
   assert.equal(back.csum, note.csum);
   assert.equal(Object.values(round.models)[0].name, "Basic");
+});
+
+test("markdown fields export as HTML with recomputed csum/sfld", () => {
+  const col = Collection.createDefault();
+  const mid = Object.values(col.models)[0].id;
+  const note = new Note({ mid, fields: ["**Capital** of France?", "Paris"] }).normalize();
+  col.addNote(note);
+  col.addCard(new Card({ nid: note.id, did: 1 }));
+
+  const out = exportPackage(col, new Map(), { SQL });
+  const back = [...importPackage(out, { SQL }).collection.notes.values()][0];
+
+  // The package holds rendered HTML; checksums are computed on that HTML
+  // (Anki-consistent), not on the markdown source.
+  assert.deepEqual(back.fields, ["<strong>Capital</strong> of France?", "Paris"]);
+  assert.equal(back.sfld, "Capital of France?");
+  assert.equal(back.csum, fieldChecksum("<strong>Capital</strong> of France?"));
 });

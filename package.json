@@ -15,6 +15,7 @@
     "./model": "./src/model.js",
     "./scheduler": "./src/scheduler.js",
     "./template": "./src/template.js",
+    "./markdown": "./src/markdown.js",
     "./storage": "./src/storage.js",
     "./apkg": "./src/apkg.js",
     "./sqljs-node": "./src/sqljs-node.js"
@@ -24,9 +25,10 @@
     "serve": "python3 web/serve.py 8000"
   },
   "files": [
-    "src"
+    "src",
+    "vendor"
   ],
-  "comment": "Core (index/fsrs/model/text/ids/sha1) is dependency-free by import graph; only the ./apkg interop module imports sql.js, fflate, and fzstd.",
+  "comment": "Core (index/fsrs/model/text/ids/sha1) is dependency-free by import graph; only the ./apkg interop module imports sql.js, fflate, and fzstd. Markdown rendering (./markdown, used by ./template and ./apkg export) imports the vendored single-file marked build in vendor/ — no npm dependency, works offline.",
   "dependencies": {
     "fflate": "^0.8.3",
     "fzstd": "^0.1.1",

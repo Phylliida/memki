@@ -9,6 +9,7 @@ import {
 } from "../src/model.js";
 import { Scheduler } from "../src/scheduler.js";
 import { renderCard, cardOrdinalsForNote } from "../src/template.js";
+import { mdToHtml, mdImageToken, mdSoundToken, scanMdMedia } from "../src/markdown.js";
 import { collectionStats } from "../src/stats.js";
 import { compileSearch, searchContext } from "../src/search.js";
 import { parseCsv } from "../src/csv.js";
@@ -115,10 +116,24 @@ function sanitizeCurModel(col) {
   }
 }
 
-// --- rich-text field editor (contenteditable + native formatting, like Anki) ---
+// --- markdown field editor ---
+//
+// Fields are markdown source. The editing surface is plain text (monospace,
+// syntax visible) in a plaintext-only contenteditable, EXCEPT media tokens,
+// which render inline as atomic widgets:
+//   ![](name){width=N} → the image — click to select, drag the corner handle
+//                        to resize (writes {width=N} into the token),
+//                        double-click to restore natural size
+//   [sound:name]       → an inline audio/video player (volume persists)
+// Widgets are contenteditable=false spans whose dataset.token holds their
+// source text; serialization swaps them back, so getText() always returns
+// markdown source. Tokens whose media isn't in the store stay plain text.
+//
+// Known limitation: browser-native undo (Ctrl+Z) is unreliable across the
+// programmatic widget re-renders; note History provides real undo.
 
 function tbBtn(label, title, onClick) {
-  return el("button", { type: "button", class: "rich-tb", title, onclick: (e) => { e.preventDefault(); onClick(); } }, label);
+  return el("button", { type: "button", class: "md-tb", title, onclick: (e) => { e.preventDefault(); onClick(); } }, label);
 }
 
 /** Store a dropped/pasted file in the media store; returns its media name. */
@@ -136,17 +151,6 @@ async function storeMediaFile(file) {
 
 const isDroppableMedia = (f) =>
   f.type.startsWith("image/") || f.type.startsWith("audio/") || f.type.startsWith("video/");
-
-// Fields store media as <img src="filename">. In the editor the image must
-// actually display, so srcs referencing stored media are rewritten to blob URLs
-// tagged with data-name, and swapped back to bare filenames on read.
-function editorDisplayHtml(html) {
-  return html.replace(/(<img\b[^>]*?src\s*=\s*)(["']?)([^"'>\s]+)\2/gi, (m, pre, _q, src) => {
-    const name = safeDecode(src);
-    if (!state.media.has(name)) return m;
-    return `${pre}"${mediaUrl(name)}" data-name="${encodeURIComponent(name)}"`;
-  });
-}
 
 /** Move the caret to the point (x, y), clamped to stay inside `container`. */
 function placeCaretAt(container, x, y) {
@@ -172,73 +176,211 @@ function placeCaretAt(container, x, y) {
 
 const mediaFilesOf = (dt) => [...(dt?.files ?? [])].filter(isDroppableMedia);
 
-/** A rich-text editor over a field's HTML. Returns { el, getHTML, setHTML, focus }. */
-function richEditor(initialHtml = "") {
-  const area = el("div", { class: "rich", contenteditable: "true" });
-  area.innerHTML = editorDisplayHtml(initialHtml);
-  const raw = el("textarea", { class: "rich-raw mono" });
-  raw.style.display = "none";
-  let rawMode = false;
+/** A markdown source editor over a field. Returns { el, getText, setText, focus }. */
+function mdEditor(initial = "") {
+  const area = el("div", { class: "md", contenteditable: "plaintext-only" });
+  // Engines without plaintext-only support fall back to a plain contenteditable
+  // plus Enter/paste interception that keeps the content text-only.
+  const plainOnly = area.contentEditable === "plaintext-only";
+  if (!plainOnly) area.contentEditable = "true";
 
-  /** The field HTML to store: the editor DOM with media srcs back to filenames. */
-  const storageHtml = () => {
-    const clone = area.cloneNode(true);
-    for (const img of clone.querySelectorAll("img[data-name]")) {
-      img.setAttribute("src", safeDecode(img.getAttribute("data-name")));
-      img.removeAttribute("data-name");
+  // --- source ⇄ DOM ---
+
+  /** An atomic widget for a media token, or null to leave it as plain text. */
+  const widgetFor = (tok) => {
+    const url = mediaUrl(tok.name);
+    if (!url) return null; // media not in the store — keep it editable text
+    let inner;
+    if (tok.kind === "img") {
+      inner = el("img", { src: url, alt: tok.raw });
+      if (tok.width) inner.setAttribute("width", String(tok.width));
+    } else {
+      const isVideo = /\.(mp4|webm|mov)$/i.test(tok.name);
+      inner = el(isVideo ? "video" : "audio", { controls: "", preload: "metadata", src: url, class: "av" });
+      inner.dataset.name = encodeURIComponent(tok.name);
     }
-    for (const img of clone.querySelectorAll("img.img-selected")) {
-      img.classList.remove("img-selected"); // editor-only selection marker
-      if (!img.className) img.removeAttribute("class");
+    const w = el("span", { class: `md-w md-w-${tok.kind}`, contenteditable: "false" }, inner);
+    w.dataset.token = tok.raw;
+    return w;
+  };
+
+  /** Rebuild the area's DOM from markdown source. */
+  const render = (source) => {
+    const frag = document.createDocumentFragment();
+    let pos = 0;
+    for (const tok of scanMdMedia(source)) {
+      const w = widgetFor(tok);
+      if (!w) continue;
+      frag.append(document.createTextNode(source.slice(pos, tok.start)), w);
+      pos = tok.start + tok.raw.length;
     }
-    return clone.innerHTML;
+    frag.append(document.createTextNode(source.slice(pos)));
+    area.replaceChildren(frag);
+    wireSoundVolumes(area);
+  };
+
+  /** Source length of a DOM node (widgets count as their token text). */
+  const measure = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) return node.data.length;
+    if (node.dataset?.token != null) return node.dataset.token.length;
+    if (node.tagName === "BR") return 1;
+    let n = 0;
+    for (const ch of node.childNodes) n += measure(ch);
+    return n;
+  };
+
+  /** The field's markdown source: text with widgets swapped back to tokens. */
+  const serialize = () => {
+    let out = "";
+    const walk = (node) => {
+      for (const ch of node.childNodes) {
+        if (ch.nodeType === Node.TEXT_NODE) out += ch.data;
+        else if (ch.dataset?.token != null) out += ch.dataset.token;
+        else if (ch.tagName === "BR") out += "\n";
+        else walk(ch);
+      }
+    };
+    walk(area);
+    return out;
+  };
+
+  /** Source offset of a DOM (container, offset) position within the area. */
+  const offsetAt = (container, offset) => {
+    const walk = (node) => {
+      if (node === container) {
+        if (node.nodeType === Node.TEXT_NODE) return offset;
+        let n = 0;
+        for (let i = 0; i < offset && i < node.childNodes.length; i++) n += measure(node.childNodes[i]);
+        return n;
+      }
+      let acc = 0;
+      for (const ch of node.childNodes) {
+        if (ch.dataset?.token != null) { acc += measure(ch); continue; } // atomic
+        if (ch === container || (ch.nodeType === Node.ELEMENT_NODE && ch.contains(container))) {
+          return acc + walk(ch);
+        }
+        acc += measure(ch);
+      }
+      return acc;
+    };
+    return walk(area);
+  };
+
+  /** Current selection as [start, end] source offsets, or null if outside. */
+  const selOffsets = () => {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return null;
+    const r = sel.getRangeAt(0);
+    if (!area.contains(r.startContainer) || !area.contains(r.endContainer)) return null;
+    return [offsetAt(r.startContainer, r.startOffset), offsetAt(r.endContainer, r.endOffset)];
+  };
+
+  /** Place the caret at a source offset (clamped; widgets are skipped over). */
+  const restoreCaret = (off) => {
+    let acc = 0, target = null, tOff = 0;
+    const walk = (node) => {
+      for (const ch of node.childNodes) {
+        const len = measure(ch);
+        if (!target && off <= acc + len) {
+          if (ch.nodeType === Node.TEXT_NODE) { target = ch; tOff = Math.max(0, off - acc); return; }
+          if (ch.dataset?.token == null && ch.tagName !== "BR") { walk(ch); if (target) return; }
+        }
+        acc += len;
+      }
+    };
+    walk(area);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    const r = document.createRange();
+    if (target) r.setStart(target, Math.min(tOff, target.data.length));
+    else { r.selectNodeContents(area); r.collapse(false); }
+    sel.addRange(r);
+  };
+
+  /** Re-render from a new source; restores the caret and notifies listeners. */
+  const setSource = (src, caret = null) => {
+    render(src);
+    if (caret != null) { area.focus(); restoreCaret(caret); }
+    area.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+
+  const insertAtCaret = (text) => {
+    const src = serialize();
+    const [s] = selOffsets() ?? [src.length];
+    setSource(src.slice(0, s) + text + src.slice(s), s + text.length);
+  };
+
+  // --- retokenization: completed media tokens become widgets while typing ---
+
+  const retokenize = () => {
+    const src = serialize();
+    const cur = [...area.querySelectorAll(".md-w")].map((w) => w.dataset.token);
+    const want = scanMdMedia(src).filter((t) => state.media.has(t.name)).map((t) => t.raw);
+    if (cur.join("\x1f") === want.join("\x1f")) return; // token set unchanged
+    const sel = selOffsets();
+    render(src);
+    if (sel) restoreCaret(sel[0]);
+  };
+  const scheduleRetokenize = debounced(retokenize, 250);
+  area.addEventListener("input", (e) => {
+    if (!isMediaEvent(e)) scheduleRetokenize();
+    if (sizingImg) positionHandle();
+  });
+
+  // --- formatting actions (operate on the source string) ---
+
+  const surround = (pre, post = pre) => {
+    const src = serialize();
+    const [s, e] = selOffsets() ?? [src.length, src.length];
+    const inner = src.slice(s, e);
+    setSource(src.slice(0, s) + pre + inner + post + src.slice(e),
+      inner ? e + pre.length + post.length : s + pre.length);
+  };
+
+  const linePrefix = (mk) => {
+    const src = serialize();
+    const [s, e] = selOffsets() ?? [src.length, src.length];
+    const ls = src.lastIndexOf("\n", Math.max(0, s - 1)) + 1;
+    const nl = src.indexOf("\n", e);
+    const le = nl === -1 ? src.length : nl;
+    const out = src.slice(ls, le).split("\n").map((l, i) => mk(i) + l).join("\n");
+    setSource(src.slice(0, ls) + out + src.slice(le), ls + out.length);
+  };
+
+  const wrapCloze = () => {
+    const src = serialize();
+    let max = 0, m;
+    const re = /\{\{c(\d+)::/g;
+    while ((m = re.exec(src))) max = Math.max(max, Number(m[1]));
+    surround(`{{c${max + 1}::`, "}}");
+  };
+
+  const insertLink = () => {
+    const src = serialize();
+    const [s, e] = selOffsets() ?? [src.length, src.length];
+    const text = src.slice(s, e);
+    const url = prompt("Link URL:", "https://");
+    if (!url) return;
+    const next = `[${text}](${url})`;
+    setSource(src.slice(0, s) + next + src.slice(e), s + next.length);
   };
 
   const insertMedia = async (file) => {
-    if (rawMode) return;
     const name = await storeMediaFile(file);
-    area.focus();
-    const sel = window.getSelection();
-    if (!sel.rangeCount || !area.contains(sel.getRangeAt(0).startContainer)) {
-      const r = document.createRange();
-      r.selectNodeContents(area);
-      r.collapse(false);
-      sel.removeAllRanges();
-      sel.addRange(r);
-    }
-    if (file.type.startsWith("image/")) {
-      document.execCommand("insertHTML", false,
-        `<img src="${mediaUrl(name)}" data-name="${encodeURIComponent(name)}">`);
-    } else {
-      // Audio/video go in as Anki's [sound:...] tag (players render at review).
-      document.execCommand("insertText", false, `[sound:${name}]`);
-    }
+    insertAtCaret(file.type.startsWith("image/") ? mdImageToken(name) : mdSoundToken(name));
   };
 
-  const cmd = (c, val = null) => { area.focus(); document.execCommand(c, false, val); };
-  const wrapCloze = () => {
-    if (rawMode) return;
-    area.focus();
-    const sel = window.getSelection();
-    const text = sel && !sel.isCollapsed ? sel.toString() : "";
-    let max = 0; let m;
-    const re = /\{\{c(\d+)::/g;
-    while ((m = re.exec(area.innerHTML))) max = Math.max(max, Number(m[1]));
-    document.execCommand("insertText", false, `{{c${max + 1}::${text}}}`);
-  };
-  const toggleRaw = () => {
-    rawMode = !rawMode;
-    hideHandle();
-    if (rawMode) { raw.value = storageHtml(); raw.style.display = ""; area.style.display = "none"; }
-    else { area.innerHTML = editorDisplayHtml(raw.value); raw.style.display = "none"; area.style.display = ""; }
-    updateSoundStrip();
-  };
+  // --- keyboard, drag & drop, paste ---
 
   area.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "c") { e.preventDefault(); wrapCloze(); }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "c") {
+      e.preventDefault();
+      wrapCloze();
+      return;
+    }
+    if (!plainOnly && e.key === "Enter") { e.preventDefault(); insertAtCaret("\n"); }
   });
 
-  // Drag-and-drop and paste images straight into the field.
   area.addEventListener("dragover", (e) => {
     if ([...(e.dataTransfer?.items ?? [])].some((i) => i.kind === "file")) {
       e.preventDefault();
@@ -256,66 +398,41 @@ function richEditor(initialHtml = "") {
   });
   area.addEventListener("paste", async (e) => {
     const files = mediaFilesOf(e.clipboardData);
-    if (!files.length) return;
-    e.preventDefault();
-    for (const f of files) await insertMedia(f);
-  });
-
-  // Inline players for the field's [sound:...] tags, live-updated while
-  // editing. Volume changes on these persist like everywhere else.
-  const soundStrip = el("div", { class: "sound-strip" });
-  soundStrip.style.display = "none";
-  let stripNames = "";
-  const updateSoundStrip = () => {
-    const html = rawMode ? raw.value : storageHtml();
-    const names = [...new Set([...html.matchAll(/\[sound:([^\]]+)\]/g)].map((m) => m[1].trim()))];
-    // Rebuild only when the sound set actually changed — a rebuild replaces
-    // the players, resetting playback and any in-progress volume drag.
-    const key = names.join("\x1f");
-    if (key === stripNames) return;
-    stripNames = key;
-    if (!names.length) {
-      soundStrip.replaceChildren();
-      soundStrip.style.display = "none";
+    if (files.length) {
+      e.preventDefault();
+      for (const f of files) await insertMedia(f);
       return;
     }
-    soundStrip.style.display = "";
-    soundStrip.replaceChildren(...names.map((name) => {
-      const url = mediaUrl(name);
-      if (!url) return el("span", { class: "muted sound-missing" }, `${name} (missing)`);
-      const isVideo = /\.(mp4|webm|mov)$/i.test(name);
-      const av = el(isVideo ? "video" : "audio", { controls: "", preload: "metadata", src: url, class: "av" });
-      av.dataset.name = encodeURIComponent(name);
-      return av;
-    }));
-    wireSoundVolumes(soundStrip);
+    if (!plainOnly) {
+      const t = e.clipboardData?.getData("text/plain");
+      if (t) { e.preventDefault(); insertAtCaret(t); }
+    }
+  });
+
+  // --- toolbar ---
+
+  const pickMedia = () => {
+    const inp = el("input", { type: "file", accept: "image/*,audio/*,video/*" });
+    inp.addEventListener("change", () => { if (inp.files[0]) insertMedia(inp.files[0]); });
+    inp.click();
   };
-  const scheduleSoundStrip = debounced(updateSoundStrip, 300);
-
-  const toolbar = el("div", { class: "rich-toolbar" },
-    tbBtn("B", "Bold", () => cmd("bold")),
-    tbBtn("I", "Italic", () => cmd("italic")),
-    tbBtn("U", "Underline", () => cmd("underline")),
-    tbBtn("•", "Bullet list", () => cmd("insertUnorderedList")),
-    tbBtn("1.", "Numbered list", () => cmd("insertOrderedList")),
-    tbBtn("T̶", "Clear formatting", () => cmd("removeFormat")),
+  const toolbar = el("div", { class: "md-toolbar" },
+    tbBtn("B", "Bold: **text**", () => surround("**")),
+    tbBtn("I", "Italic: *text*", () => surround("*")),
+    tbBtn("S̶", "Strikethrough: ~~text~~", () => surround("~~")),
+    tbBtn("`", "Inline code: `text`", () => surround("`")),
+    tbBtn("•", "Bullet list", () => linePrefix(() => "- ")),
+    tbBtn("1.", "Numbered list", () => linePrefix((i) => `${i + 1}. `)),
+    tbBtn("link", "Link: [text](url)", insertLink),
     tbBtn("[…]", "Cloze (Ctrl+Shift+C)", wrapCloze),
-    tbBtn(icon("image"), "Insert image/audio/video (or drag & drop / paste)", () => {
-      const inp = el("input", { type: "file", accept: "image/*,audio/*,video/*" });
-      inp.addEventListener("change", () => { if (inp.files[0]) insertMedia(inp.files[0]); });
-      inp.click();
-    }),
-    tbBtn("</>", "Edit HTML", toggleRaw),
+    tbBtn(icon("image"), "Insert image/audio/video (or drag & drop / paste)", pickMedia),
   );
-  const wrap = el("div", { class: "rich-wrap" }, toolbar, area, raw, soundStrip);
-  // area and raw both bubble here; media controls' composed input events
-  // (volume slider drags) must not count as content edits.
-  wrap.addEventListener("input", (e) => { if (!isMediaEvent(e)) scheduleSoundStrip(); });
-  updateSoundStrip();
+  const wrap = el("div", { class: "md-wrap" }, toolbar, area);
 
-  // --- image sizing (Anki-style): click an image to select it, drag the
-  // corner handle to resize (stored as a width attribute, so it persists in
-  // the note and in exports), double-click to restore natural size. ---
+  // --- image sizing: click an image to select it, drag the corner handle to
+  // resize (the width is written back into the token as {width=N}, so it
+  // persists in the note and in exports), double-click to restore natural
+  // size. Same interaction model as the old rich-text editor. ---
   const handle = el("span", { class: "img-handle", title: "Drag to resize · double-click image to reset" });
   handle.style.display = "none";
   wrap.append(handle);
@@ -327,16 +444,26 @@ function richEditor(initialHtml = "") {
     handle.style.display = "none";
   };
   const positionHandle = () => {
-    if (!sizingImg || !sizingImg.isConnected || rawMode) { hideHandle(); return; }
+    if (!sizingImg || !sizingImg.isConnected) { hideHandle(); return; }
     const wrapR = wrap.getBoundingClientRect();
     const r = sizingImg.getBoundingClientRect();
     handle.style.left = `${r.right - wrapR.left - 8}px`;
     handle.style.top = `${r.bottom - wrapR.top - 8}px`;
     handle.style.display = "";
   };
+  const tokenWithWidth = (token, width) =>
+    token.replace(/\{width=\d+\}$/, "") + (width ? `{width=${width}}` : "");
+  /** Write the selected image's width back into its widget's source token. */
+  const commitWidth = (width) => {
+    const w = sizingImg?.closest(".md-w");
+    if (!w) return;
+    w.dataset.token = tokenWithWidth(w.dataset.token, width);
+    // The resize changed the field source — let autosave / preview know.
+    area.dispatchEvent(new Event("input", { bubbles: true }));
+  };
 
   area.addEventListener("click", (e) => {
-    if (e.target.tagName === "IMG") {
+    if (e.target.tagName === "IMG" && e.target.closest(".md-w")) {
       if (sizingImg !== e.target) {
         sizingImg?.classList.remove("img-selected");
         sizingImg = e.target;
@@ -348,13 +475,13 @@ function richEditor(initialHtml = "") {
     }
   });
   area.addEventListener("dblclick", (e) => {
-    if (e.target.tagName === "IMG") {
+    if (e.target.tagName === "IMG" && e.target.closest(".md-w")) {
+      sizingImg = e.target;
       e.target.removeAttribute("width");
-      e.target.removeAttribute("height");
+      commitWidth(null);
       positionHandle();
     }
   });
-  area.addEventListener("input", () => { if (sizingImg) positionHandle(); });
   handle.addEventListener("pointerdown", (e) => {
     if (!sizingImg) return;
     e.preventDefault();
@@ -365,21 +492,23 @@ function richEditor(initialHtml = "") {
     const move = (ev) => {
       const w = Math.min(Math.max(Math.round(startW + (ev.clientX - startX)), 16), maxW);
       img.setAttribute("width", String(w));
-      img.removeAttribute("height"); // keep aspect ratio
       positionHandle();
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      commitWidth(Math.round(img.getBoundingClientRect().width));
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   });
 
+  render(initial);
+
   return {
     el: wrap,
-    getHTML: () => (rawMode ? raw.value : storageHtml()),
-    setHTML: (h) => { hideHandle(); area.innerHTML = editorDisplayHtml(h); raw.value = h; },
+    getText: () => serialize(),
+    setText: (t) => { hideHandle(); render(t ?? ""); },
     focus: () => area.focus(),
   };
 }
@@ -453,7 +582,7 @@ function scheduleVolumeSave(name, v) {
 
 /** Did this event originate inside a media player (e.g. its volume slider)? */
 function isMediaEvent(e) {
-  return !!(e.target && (e.target.closest?.("audio, video, .sound-strip")));
+  return !!(e.target && (e.target.closest?.("audio, video")));
 }
 
 /** Apply saved volumes to the players under `root` and persist adjustments. */
@@ -509,6 +638,9 @@ function mathify(html) {
 function displayHtml(html) {
   return resolveMedia(resolveSounds(mathify(html)));
 }
+
+/** Plain-text preview of a markdown field, for list rows (browse, history). */
+const fieldText = (s) => stripHtml(mdToHtml(s ?? ""));
 
 /** A card face: model-styled `.card` inside the `.card-face` frame. */
 function cardFace(html) {
@@ -852,7 +984,7 @@ function renderAddCard() {
       return;
     }
     fieldsWrap.replaceChildren(...model.flds.map((f) => {
-      const ed = richEditor("");
+      const ed = mdEditor("");
       inputs.push(ed);
       return el("label", {}, f.name, ed.el);
     }));
@@ -863,7 +995,7 @@ function renderAddCard() {
   const updatePreview = () => {
     const model = state.col.noteType(Number(modelSel.value)) ?? models[0];
     if (!model) { previewBox.replaceChildren(); return; }
-    const fields = inputs.map((ed) => ed.getHTML());
+    const fields = inputs.map((ed) => ed.getText());
     const tmpNote = new Note({ mid: model.id, fields });
     const ords = cardOrdinalsForNote(model, tmpNote);
     if (!ords.length) {
@@ -895,7 +1027,7 @@ function renderAddCard() {
   const save = async () => {
     const model = state.col.noteType(Number(modelSel.value)) ?? models[0];
     if (!model) { setStatus("No note type available."); return; }
-    const fields = inputs.map((ed) => ed.getHTML());
+    const fields = inputs.map((ed) => ed.getText());
     // Emptiness check Anki-style: media filenames count as content, so an
     // image-only (or [sound:]-only) first field is a valid note.
     if (!stripHtmlPreservingMediaFilenames(fields[0]).trim()) { setStatus("The first field is empty."); return; }
@@ -1320,7 +1452,7 @@ function renderBrowse() {
     list.replaceChildren(
       ...shown.map((card) => {
         const note = state.col.notes.get(card.nid);
-        const title = stripHtml(note.fields[0] ?? "").slice(0, 80) || "(empty)";
+        const title = fieldText(note.fields[0]).slice(0, 80) || "(empty)";
         const flags = [...cardFlagSet(card)].sort();
         return el("div", {
           class: `browse-row${note.id === selectedNoteId ? " selected" : ""}`,
@@ -1369,7 +1501,7 @@ function noteEditorForm(noteId, cb = {}) {
   if (!note) return el("div", { class: "center muted" }, "Note not found.");
   const model = state.col.noteType(note.mid);
 
-  const inputs = model.flds.map((f) => ({ f, ed: richEditor(note.fields[f.ord] ?? "") }));
+  const inputs = model.flds.map((f) => ({ f, ed: mdEditor(note.fields[f.ord] ?? "") }));
 
   // Tags are bubbles: one per tag in the collection, toggled on/off for this
   // note and persisted immediately; "+ New tag" opens a small popout.
@@ -1446,7 +1578,7 @@ function noteEditorForm(noteId, cb = {}) {
     saveTimer = null;
     if (!state.col.notes.has(note.id)) return; // deleted meanwhile
     await ensureHistory();
-    note.fields = inputs.map(({ ed }) => ed.getHTML());
+    note.fields = inputs.map(({ ed }) => ed.getText());
     note.mod = Math.floor(Date.now() / 1000);
     note.normalize(model.sortf ?? 0);
     await putNote(state.db, note);
@@ -1533,9 +1665,9 @@ function noteEditorForm(noteId, cb = {}) {
       ? entries.map((e) => el("div", { class: "hist-row" },
           el("div", { class: "hist-meta" },
             el("b", {}, new Date(e.ts).toLocaleString()),
-            el("span", { class: "muted" }, ` · ${stripHtml(e.fields[0] ?? "").slice(0, 60) || "(empty)"}`)),
+            el("span", { class: "muted" }, ` · ${fieldText(e.fields[0]).slice(0, 60) || "(empty)"}`)),
           el("button", { type: "button", onclick: async () => {
-            await pushNoteHistory(state.db, note.id, inputs.map(({ ed }) => ed.getHTML()), [...note.tags]);
+            await pushNoteHistory(state.db, note.id, inputs.map(({ ed }) => ed.getText()), [...note.tags]);
             note.fields = [...e.fields];
             note.tags = [...e.tags];
             note.mod = Math.floor(Date.now() / 1000);
@@ -2086,7 +2218,7 @@ function occlusionFace(note, ord, side) {
   const parts = [];
   if (header) parts.push(el("div", { class: "io-header" }, header));
   parts.push(stage);
-  if (side === "a" && back) parts.push(el("div", { class: "io-back", html: displayHtml(back) }));
+  if (side === "a" && back) parts.push(el("div", { class: "io-back", html: displayHtml(mdToHtml(back)) }));
   return el("div", { class: "card-face" }, ...parts);
 }
 

@@ -27,6 +27,24 @@ import {
   Collection, Note, Card, Revlog,
   defaultConf, defaultDeck, defaultDeckConfig,
 } from "./model.js";
+import { joinFields, fieldChecksum, sortField } from "./text.js";
+import { mdToHtml } from "./markdown.js";
+
+/**
+ * A note's export row: fields rendered markdown→HTML with sfld/csum recomputed
+ * on that HTML, so Anki receives its native field format with consistent
+ * checksums. (Inline/block HTML fields pass mdToHtml unchanged, so pre-markdown
+ * notes and Anki imports export exactly as before.) The collection is untouched.
+ */
+function exportNoteRow(col, n) {
+  const fields = n.fields.map((f) => mdToHtml(f));
+  const sortIdx = col.noteType(n.mid)?.sortf ?? 0;
+  const row = n.toRow();
+  row[6] = joinFields(fields);
+  row[7] = sortField(fields, sortIdx);
+  row[8] = fieldChecksum(fields[0] ?? "");
+  return row;
+}
 
 // Exact schema-v11 DDL (genanki's, proven to import into every Anki version).
 const APKG_SCHEMA = `
@@ -310,7 +328,7 @@ function writeCollectionDb(SQL, col) {
         stmt.free();
       }
     };
-    insertAll(`INSERT INTO notes VALUES (${Q(11)})`, [...col.notes.values()].map((n) => n.toRow()));
+    insertAll(`INSERT INTO notes VALUES (${Q(11)})`, [...col.notes.values()].map((n) => exportNoteRow(col, n)));
     insertAll(`INSERT INTO cards VALUES (${Q(18)})`, [...col.cards.values()].map((c) => c.toRow()));
     insertAll(`INSERT INTO revlog VALUES (${Q(9)})`, col.revlog.map((r) => r.toRow()));
 

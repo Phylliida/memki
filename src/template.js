@@ -19,6 +19,7 @@
 
 import { stripHtml } from "./text.js";
 import { NoteTypeKind } from "./model.js";
+import { mdToHtml } from "./markdown.js";
 
 const TOKEN = /\{\{\s*([#^/])?\s*([^}]+?)\s*\}\}/g;
 
@@ -375,7 +376,11 @@ export function renderCard(noteType, ord, note, opts = {}) {
   // Cloze note types have a single template; the ordinal selects the cloze number.
   const tmpl = noteType.tmpls[isCloze ? 0 : ord];
   if (!tmpl) throw new Error(`note type has no template ord ${ord}`);
+  // Fields are markdown source: convert to HTML before substitution so every
+  // filter (text:, hint:, type:, cloze:) and FrontSide operates on HTML.
+  // Inline/block HTML in legacy fields passes through mdToHtml unchanged.
   const fields = fieldMap(noteType, note);
+  for (const k in fields) fields[k] = mdToHtml(fields[k]);
   const base = {
     fields,
     Tags: (note.tags ?? []).join(" "),

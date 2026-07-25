@@ -24,7 +24,7 @@ export back to `.apkg`.
 | JSON backup / restore | ✅ one-file backup of collection + media — **the native format** |
 | Sync merge engine | ✅ static-file sync core: deterministic, order-insensitive merge (revlog unions, notes by GUID, cards by note/deck/ord, delete-wins) |
 | CSV / TSV import | ✅ delimiter detect, header, column→field mapping |
-| Rich-text field editor | ✅ contenteditable (bold/italic/lists/cloze/HTML toggle, **drag-drop / paste images & audio**) |
+| Markdown field editor (`src/markdown.js`) | ✅ fields are **markdown** (CommonMark + GFM, vendored marked — offline, no build). Media tokens are inline widgets: resizable images (`{width=N}`), audio/video players with volume; drag-drop / paste media; cloze shortcut. Legacy HTML fields pass through untouched |
 | Day rollover | ✅ local days, configurable rollover hour (default 4 AM), creationOffset |
 | Stock note types | ✅ Basic, and-reversed, optional-reversed, type-in, Cloze; conditional card generation |
 | Scheduler (v3: SM-2 + FSRS, fuzz, daily limits, burying, learn-ahead) | ✅ matches rslib state-machine + fuzz vectors |
@@ -50,6 +50,13 @@ lossy compatibility snapshot** for moving cards into Anki: multi-flags degrade
 to the lowest flag, and the per-deck memory rides opaquely in `notes.data`.
 Prefer JSON for backups and device-to-device transfer; use `.apkg` to share
 decks with Anki users.
+
+**Fields are markdown source.** Cards render them through marked (with math,
+`[sound:]`, and image `{width=N}` extensions) at display time, and `.apkg`
+export converts every field to HTML with recomputed `sfld`/`csum`, so Anki
+receives its native format. Inline/block HTML passes the renderer unchanged,
+so notes written before this change (or imported from Anki) keep working —
+editing one simply shows its HTML source in the markdown editor.
 
 ## Run the app
 
