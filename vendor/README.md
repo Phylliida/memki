@@ -11,6 +11,14 @@ at runtime, no build step). Imported via relative paths from `src/`.
 | `turndown.esm.js` | [turndown](https://github.com/mixmark-io/turndown) (HTML → markdown) | 7.2.4 | MIT | `https://cdn.jsdelivr.net/npm/turndown@7.2.4/+esm` |
 | `turndown-gfm.esm.js` | [turndown-plugin-gfm](https://github.com/laurent22/turndown-plugin-gfm) | 1.0.2 | MIT | `https://cdn.jsdelivr.net/npm/turndown-plugin-gfm@1.0.2/+esm` |
 | `domino.esm.js` | [@mixmark-io/domino](https://github.com/fgnass/domino) (DOM for turndown in node; the browser uses its native DOMParser) | 2.2.0 | BSD-2 | `https://cdn.jsdelivr.net/npm/@mixmark-io/domino@2.2.0/+esm` |
+| `fflate.esm.js` | [fflate](https://github.com/101arrowz/fflate) (`esm/browser.js`) | 0.8.3 | MIT | `https://cdn.jsdelivr.net/npm/fflate@0.8.3/+esm` |
+| `fzstd.esm.js` | [fzstd](https://github.com/101arrowz/fzstd) (`esm/index.mjs`) | 0.1.1 | MIT | `https://cdn.jsdelivr.net/npm/fzstd@0.1.1/+esm` |
+| `sqljs/` | [sql.js](https://github.com/sql-js/sql.js) — `sql-wasm.js` + `sql-wasm.wasm` + `sqljs.esm.js` ESM facade | 1.14.1 | MIT | `https://cdn.jsdelivr.net/npm/sql.js@1.14.1/dist/` |
+| `mathjax/` | [MathJax](https://github.com/mathjax/MathJax) — `tex-mml-chtml.js` + `output/chtml/fonts/woff-v2` | 3.2.2 | Apache-2.0 | `https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/` |
 
 To upgrade: download the new `+esm` build over the file and bump the version
 here, then run `npm test`.
+
+`fflate`, `fzstd`, `sqljs/`, and `mathjax/` are only referenced from
+`web/index.html` / `web/app.js` (deck import/export and math rendering) and
+load lazily — the scheduling core never touches them.

@@ -1,6 +1,6 @@
 // oss-anki browser app: local-first study UI over the oss-anki core library.
-// Core study/persistence runs fully offline; .apkg import/export lazily loads
-// sql.js + fflate + fzstd from the CDN (see the import map in index.html).
+// Fully offline: .apkg import/export lazily loads vendored sql.js + fflate +
+// fzstd builds from ../vendor/ (see the import map in index.html).
 
 import {
   Collection, Note, Card, NoteTypeKind, CardType, CardQueue, imageOcclusionNoteType,
@@ -20,9 +20,10 @@ import {
   openCollectionDB, loadCollection, saveCollection,
   putCard, putNote, putRevlog, putMeta, saveMedia, loadMedia, clearAll, deleteCards, deleteNoteAndCards, deleteRevlog,
   pushNoteHistory, listNoteHistory, deleteNoteHistory,
-} from "../src/storage.js";
+  isNative, flushStore, storeStamp,
+} from "./storage.js";
 
-const SQL_CDN = "https://cdn.jsdelivr.net/npm/sql.js@1.14.1/dist/";
+const SQL_CDN = new URL("../vendor/sqljs/", import.meta.url).href;
 
 const state = {
   db: null,
@@ -2670,9 +2671,17 @@ async function loadSql() {
 async function doBackup() {
   const { collectionToBackup } = await import("../src/backup.js");
   const data = JSON.stringify(collectionToBackup(state.col, state.media));
+  const name = `oss-anki-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  if (isNative) {
+    // No anchor-download in the Capacitor WebView — write into the save folder.
+    const { writeToFolder, textToBase64, folderLabel } = await import("./native-bridge.js");
+    await writeToFolder(name, textToBase64(data));
+    setStatus(`Backup written to ${name} in ${await folderLabel()}.`);
+    return;
+  }
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([data], { type: "application/json" }));
-  a.download = `oss-anki-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = name;
   a.click();
   URL.revokeObjectURL(a.href);
   setStatus("Backup downloaded.");
@@ -2737,6 +2746,13 @@ async function doExport() {
     const { exportPackage } = await import("../src/apkg.js");
     const SQL = await loadSql();
     const bytes = exportPackage(state.col, state.media, { SQL });
+    if (isNative) {
+      const { writeToFolder, bytesToBase64, folderLabel } = await import("./native-bridge.js");
+      const name = `oss-anki-export-${new Date().toISOString().slice(0, 10)}.apkg`;
+      await writeToFolder(name, bytesToBase64(bytes));
+      setStatus(`Exported to ${name} in ${await folderLabel()}.`);
+      return;
+    }
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([bytes]));
     a.download = "oss-anki-export.apkg";
@@ -2751,6 +2767,70 @@ async function doExport() {
 
 // --- init ---
 
+// --- native (Capacitor Android): save folder + file-change watching ---
+
+async function updateFolderButton() {
+  const { folderLabel } = await import("./native-bridge.js");
+  const label = await folderLabel();
+  const btn = document.getElementById("btn-folder");
+  btn.textContent = label ? `Folder: ${label}` : "Folder";
+  btn.title = label ? `Saving oss-anki.json in ${label}` : "Choose save folder";
+}
+
+/** Reload the collection from the save file (external change / folder switch). */
+async function reloadFromSaveFile(statusMsg) {
+  const col = await loadCollection(state.db, { force: true });
+  state.col = col ?? Collection.createDefault();
+  if (!col) await saveCollection(state.db, state.col);
+  state.media = await loadMedia(state.db);
+  state.mediaUrls.clear();
+  state.card = null;
+  state.lastAction = null;
+  setStatus(statusMsg);
+  renderDecks();
+}
+
+/** Pick a new save folder, then load whatever oss-anki.json lives there. */
+async function onChangeFolder() {
+  try {
+    await flushStore(state.db); // don't lose pending edits to the old file
+    const { pickSaveFolder, folderLabel } = await import("./native-bridge.js");
+    if (!(await pickSaveFolder())) return;
+    await reloadFromSaveFile(`Save folder: ${await folderLabel()}.`);
+    await flushStore(state.db); // a fresh default collection lands immediately
+    updateFolderButton();
+  } catch (e) {
+    setStatus(`Folder switch failed: ${e.message}`);
+    console.error(e);
+  }
+}
+
+/** On resume: flush our edits, then reload if the file changed underneath us. */
+async function onNativeResume() {
+  if (!state.db) return;
+  try {
+    await flushStore(state.db); // last-writer-wins: pending edits land first
+    const { statSaveFile } = await import("./native-bridge.js");
+    const st = await statSaveFile();
+    if (st.exists && st.modified !== storeStamp(state.db)) {
+      await reloadFromSaveFile("Reloaded — save file changed on disk.");
+    }
+  } catch (e) {
+    console.error("resume reload failed:", e);
+  }
+}
+
+async function wireNative() {
+  document.getElementById("btn-folder").hidden = false;
+  updateFolderButton();
+  const { watchAppState } = await import("./native-bridge.js");
+  watchAppState({
+    onPause: () => flushStore(state.db)?.catch?.((e) => console.error("pause flush failed:", e)),
+    onResume: () => onNativeResume(),
+  });
+  window.addEventListener("beforeunload", () => { flushStore(state.db); });
+}
+
 function wireHeader() {
   document.getElementById("btn-add").addEventListener("click", renderAddCard);
   document.getElementById("btn-browse").addEventListener("click", () => renderBrowse());
@@ -2764,6 +2844,7 @@ function wireHeader() {
   });
   document.getElementById("btn-export").addEventListener("click", doExport);
   document.getElementById("btn-backup").addEventListener("click", doBackup);
+  document.getElementById("btn-folder").addEventListener("click", onChangeFolder);
 }
 
 // Anki-style shortcuts: space/Enter flips; 1–4 (and space/Enter) grade.
@@ -2811,6 +2892,7 @@ async function init() {
   }
   wireHeader();
   wireKeyboard();
+  if (isNative) await wireNative();
   renderDecks();
 }
 

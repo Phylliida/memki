@@ -7,27 +7,28 @@
   <title>oss-anki</title>
   <!--
     Import map so the .apkg interop module's bare imports (fflate/fzstd) and
-    sql.js resolve in the browser without a build step. These are only fetched
-    when you import/export a deck; the core study app runs fully offline.
+    sql.js resolve in the browser without a build step. All vendored under
+    ../vendor/ (zero-network); they only load when you import/export a deck.
   -->
   <script type="importmap">
   {
     "imports": {
-      "fflate": "https://cdn.jsdelivr.net/npm/fflate@0.8.3/+esm",
-      "fzstd": "https://cdn.jsdelivr.net/npm/fzstd@0.1.1/+esm",
-      "sql.js": "https://esm.sh/sql.js@1.14.1"
+      "fflate": "../vendor/fflate.esm.js",
+      "fzstd": "../vendor/fzstd.esm.js",
+      "sql.js": "../vendor/sqljs/sqljs.esm.js"
     }
   }
   </script>
   <!-- MathJax for \( \) / \[ \] (all math syntaxes normalized by src/mathify.js). -->
   <script>
     window.MathJax = {
+      chtml: { fontURL: "../vendor/mathjax/output/chtml/fonts/woff-v2" },
       tex: { inlineMath: [["\\(", "\\)"]], displayMath: [["\\[", "\\]"]] },
       options: { skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"] },
       startup: { typeset: false },
     };
   </script>
-  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  <script async src="../vendor/mathjax/tex-mml-chtml.js"></script>
   <link rel="stylesheet" href="../vendor/highlight-theme.css" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
@@ -42,9 +43,25 @@
       <button id="btn-import" title="Import an .apkg/.colpkg deck, a .csv/.tsv spreadsheet, or restore a .json backup">Import</button>
       <button id="btn-export">Export .apkg</button>
       <button id="btn-backup" title="Download a full JSON backup (collection + media)">Backup</button>
+      <button id="btn-folder" title="Save folder (Android app)" hidden>Folder</button>
       <input id="file-import" type="file" accept=".apkg,.colpkg,.json,.csv,.tsv,.txt" hidden />
     </div>
   </header>
+
+  <!-- First-run gate on the Android app: block until a save folder is chosen.
+       Driven by web/native-bridge.js (ensureSaveFolder). -->
+  <div id="folder-gate" class="folder-gate" hidden>
+    <div class="folder-gate-card">
+      <h2>Choose a save folder</h2>
+      <p>
+        oss-anki stores your whole collection as <code>oss-anki.json</code> in a
+        folder you choose, and rewrites it as you study and edit. Pick a folder
+        your sync tool (Syncthing, …) watches to keep devices in sync.
+      </p>
+      <button id="btn-pick-folder">Choose folder</button>
+      <p id="folder-gate-msg" class="muted"></p>
+    </div>
+  </div>
 
   <main id="view"></main>
 

@@ -23,7 +23,8 @@
   },
   "scripts": {
     "test": "node --test",
-    "serve": "python3 web/serve.py 8000"
+    "serve": "python3 web/serve.py 8000",
+    "build:android": "bash scripts/build-capacitor.sh && npx cap sync android"
   },
   "files": [
     "src",
@@ -31,11 +32,15 @@
   ],
   "comment": "Core (index/fsrs/model/text/ids/sha1) is dependency-free by import graph; only the ./apkg interop module imports sql.js, fflate, and fzstd. Markdown rendering (./markdown, used by ./template and ./apkg export) and HTML→markdown conversion (./html-to-md, used by ./apkg import and the app migration) import vendored single-file builds in vendor/ (marked, highlight.js, turndown, domino) — no npm dependencies at runtime, works offline.",
   "dependencies": {
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/app": "^6.0.3",
+    "@capacitor/core": "^6.2.1",
     "fflate": "^0.8.3",
     "fzstd": "^0.1.1",
     "sql.js": "^1.14.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^6.2.1",
     "fake-indexeddb": "^6.2.5"
   }
 }
