@@ -6,7 +6,10 @@
 # index.html that forwards to the real entry page (Capacitor always loads
 # webDir/index.html).
 #
-#   dist/index.html   ← redirect to ./web/
+#   dist/index.html   ← copy of web/index.html with <base href="./web/">
+#                       injected (Capacitor always loads webDir/index.html;
+#                       a meta-refresh redirect to ./web/ doesn't navigate
+#                       in the Android WebView, so we serve the app directly)
 #   dist/web/*        ← the app (minus the dev server script)
 #   dist/src/*        ← the scheduling core
 #   dist/vendor/*     ← vendored deps (sql.js/fflate/fzstd/MathJax/...)
@@ -27,18 +30,15 @@ rm -f "$DIST/web/serve.py" # dev-only static server
 cp -R src "$DIST/src"
 cp -R vendor "$DIST/vendor"
 
-cat > "$DIST/index.html" <<'HTML'
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta http-equiv="refresh" content="0;url=./web/">
-<title>oss-anki</title>
-</head>
-<body>
-<p>Loading… <a href="./web/">tap here</a> if this page does not redirect.</p>
-</body>
-</html>
-HTML
+# Root entry page: Capacitor always loads webDir/index.html. Instead of a
+# redirect stub (meta-refresh to ./web/ doesn't navigate in the Android
+# WebView — the app hung on the "Loading…" page), ship the real entry page
+# with <base href="./web/"> injected as the FIRST thing in <head>, so every
+# relative URL in the document (import map, styles, app.js) resolves under
+# web/ exactly as if the page were served from web/index.html. Module-level
+# resolution (import.meta.url, relative imports in .js files) is unaffected
+# by <base> and keeps working. All URLs stay relative — everything is
+# served from the APK's bundled assets, zero network requests.
+sed 's|<head>|<head>\n  <base href="./web/" />|' web/index.html > "$DIST/index.html"
 
 echo "Built $(du -sh "$DIST" | cut -f1) at $DIST/ ($(find "$DIST" -type f | wc -l) files)"
