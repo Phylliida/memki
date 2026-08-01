@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Adaptive-icon foreground: same note-cards artwork as icon.svg but on a
+     transparent 108x108 canvas. The cards stay within the center 72dp safe
+     zone so launcher masks (circle, squircle, ...) never clip them. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108">
+  <!-- back card -->
+  <rect x="31" y="38" width="46" height="34" rx="5" fill="#B8C9E0"
+        transform="rotate(10 54 55)"/>
+  <!-- middle card -->
+  <rect x="31" y="37" width="46" height="34" rx="5" fill="#DCE6F3"
+        transform="rotate(-7 54 54)"/>
+  <!-- front card -->
+  <rect x="32" y="39" width="44" height="32" rx="4"
+        fill="#FFFFFF" stroke="#D4DCE8" stroke-width="1"/>
+  <!-- text lines on the front card -->
+  <rect x="38" y="47" width="20" height="3" rx="1.5" fill="#4A6FA5"/>
+  <rect x="38" y="53.5" width="32" height="2.5" rx="1.25" fill="#C3CDDC"/>
+  <rect x="38" y="59" width="26" height="2.5" rx="1.25" fill="#C3CDDC"/>
+</svg>
