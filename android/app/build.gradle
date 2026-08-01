@@ -3,6 +3,21 @@ apply plugin: 'com.android.application'
 android {
     namespace "dev.phylliida.anki"
     compileSdk rootProject.ext.compileSdkVersion
+    // Pinned debug signing: every build (local or CI) signs debug APKs
+    // with this committed keystore, so `adb install -r` updates work
+    // across builds without uninstalling first
+    // (INSTALL_FAILED_UPDATE_INCOMPATIBLE = cert rotated). This is a
+    // standard debug keystore — equivalent to the per-machine one
+    // Android Studio auto-generates; release signing would use a
+    // separate keystore from CI secrets.
+    signingConfigs {
+        debug {
+            storeFile file('anki-debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
     defaultConfig {
         applicationId "dev.phylliida.anki"
         minSdkVersion rootProject.ext.minSdkVersion

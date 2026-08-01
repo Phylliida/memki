@@ -85,6 +85,12 @@ pkgs.mkShell {
     #    via Nix from the upstream flake, so no NixOS dynamic-
     #    linking workaround is needed (steam-run/nix-ld).
     iloader
+
+    # ── GitHub CLI (used by install-ipa.sh and install-android.sh
+    #    to fetch the latest workflow artifacts — IPA from
+    #    ios-build.yml, APK from android-build.yml). One-time:
+    #    `gh auth login`.
+    gh
   ];
 
   shellHook = ''

@@ -1,0 +1,142 @@
+# Build an unsigned iOS IPA on a free macOS runner. The output is
+# uploaded as a workflow artifact (`oss-anki-ipa`) that install-ipa.sh
+# downloads, then sideloads onto your iPhone via SideStore (or
+# AltServer-Linux).
+#
+# Sideloading tools re-sign the IPA with your Apple ID at install
+# time, so we don't need a paid Apple Developer account or any signing
+# secrets in the repo. CODE_SIGNING_ALLOWED=NO + manual Payload/
+# zipping gives us a fully unsigned IPA that SideStore is happy with.
+# (This is the whole "signing story" for iOS — unlike Android there is
+# NO pinned keystore; the cert is per-Apple-ID at sideload time.)
+#
+# Unlike the creature-collect workflow this is derived from, anki
+# needs none of the LocalServer/GCDWebServer Swift overrides (no
+# service worker), no plugin patching, and no bundled-data rsync
+# repair — the webDir is plain static files.
+#
+# Trigger: manual (workflow_dispatch) so you control when builds
+# happen — and a path-filtered push so deploys to main of relevant
+# files build automatically. Adjust to taste.
+
+name: Build iOS IPA (unsigned, for sideloading)
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'src/**'
+      - 'vendor/**'
+      - 'assets/**'
+      - 'scripts/build-capacitor.sh'
+      - 'capacitor.config.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/ios-build.yml'
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # `npm ci` if there's a lock file (faster, reproducible);
+      # otherwise fall back to `npm install` so the first run works
+      # before we've committed a lock.
+      - name: Install JS deps
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      # Compose the Capacitor webDir (`dist/`) — web/ + src/ + vendor/
+      # + a redirect index.html. Capacitor reads from this directory.
+      - name: Build Capacitor webDir
+        run: bash scripts/build-capacitor.sh
+
+      # The ios/ directory is gitignored — generate it fresh from
+      # capacitor.config.json on every build. Idempotent: if it
+      # already existed (cached?) cap add re-uses; otherwise it
+      # scaffolds a clean Xcode project.
+      - name: Add iOS platform
+        run: |
+          if [ ! -d ios ]; then
+            npx cap add ios
+          fi
+          npx cap sync ios
+
+      # Set the app icon from assets/icon-only.png (rendered from
+      # assets/icon/icon-foreground.svg at 1024px). @capacitor/assets
+      # writes every size into the project's
+      # Assets.xcassets/AppIcon.appiconset so xcodebuild compiles it
+      # in. continue-on-error: an icon hiccup must NEVER block the
+      # IPA — worst case the build keeps Capacitor's default icon.
+      - name: Generate app icon
+        continue-on-error: true
+        run: |
+          npx --yes @capacitor/assets generate \
+            --ios \
+            --iconBackgroundColor '#4A72B4' \
+            --iconBackgroundColorDark '#4A72B4'
+
+      # Unsigned Release build — the three CODE_SIGN_* overrides tell
+      # xcodebuild to skip signing entirely (otherwise it tries to
+      # find a developer certificate in the keychain and fails on a
+      # fresh runner).
+      - name: Build .app (unsigned)
+        run: |
+          cd ios/App
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      # Manual IPA assembly: an IPA is just a Zip with a Payload/
+      # directory at the root containing the .app bundle. Skipping
+      # xcodebuild's archive/export pipeline avoids the whole
+      # provisioning-profile question for unsigned builds.
+      - name: Package .app into .ipa
+        run: |
+          APP_PATH=$(find ios/App/build -name "App.app" -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Could not find App.app under ios/App/build/"
+            echo "Tree dump for debugging:"
+            find ios/App/build -name "*.app" -type d
+            exit 1
+          fi
+          echo "Found .app at: $APP_PATH"
+          APP_DIR=$(dirname "$APP_PATH")
+          cd "$APP_DIR"
+          mkdir -p Payload
+          cp -r App.app Payload/
+          zip -qr "$GITHUB_WORKSPACE/oss-anki.ipa" Payload
+          ls -la "$GITHUB_WORKSPACE/oss-anki.ipa"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          # install-ipa.sh fetches the artifact by this name.
+          name: oss-anki-ipa
+          path: oss-anki.ipa
+          # Keep for two weeks — long enough for slow weekends, short
+          # enough that the artifact storage stays small.
+          retention-days: 14
+          if-no-files-found: error

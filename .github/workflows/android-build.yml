@@ -1,0 +1,110 @@
+# Build a debug Android APK on a free Ubuntu runner. The output is
+# uploaded as a workflow artifact (`oss-anki-debug-apk`) that
+# install-android.sh downloads and sideloads via `adb install`.
+#
+# Signing: the debug build type is pinned to the committed
+# android/app/anki-debug.keystore (see signingConfigs in
+# android/app/build.gradle), so every build — local or CI — produces
+# APKs signed with the SAME cert. That's what lets `adb install -r`
+# update an already-installed copy instead of failing with
+# INSTALL_FAILED_UPDATE_INCOMPATIBLE. It's a standard debug keystore
+# (password android / alias androiddebugkey), safe to commit; real
+# release signing would use a separate keystore from Actions secrets.
+#
+# Unlike the creature-collect workflow this is derived from, there's
+# no gradle patching here: anki's android/ project is committed to
+# the repo (icons included), needs no Kotlin/plugins/overrides, and
+# its webDir has no icons/fonts dirs for `cap sync` to strip.
+#
+# Trigger: manual workflow_dispatch plus a path-filtered push to main
+# for relevant changes.
+
+name: Build Android APK (debug, for sideloading)
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'src/**'
+      - 'vendor/**'
+      - 'assets/**'
+      - 'scripts/build-capacitor.sh'
+      - 'capacitor.config.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'android/**'
+      - '.github/workflows/android-build.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # `npm ci` if there's a lock file (faster, reproducible);
+      # otherwise fall back to `npm install`.
+      - name: Install JS deps
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      # Compose dist/ (web/ + src/ + vendor/ + redirect index.html).
+      - name: Build Capacitor webDir
+        run: bash scripts/build-capacitor.sh
+
+      # JDK 17 is the current Capacitor 6 / Android Gradle Plugin
+      # baseline. `temurin` is the standard distribution available
+      # on the GitHub-hosted runner.
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # android/ is committed — `cap sync` just copies dist/ →
+      # app/src/main/assets/public/ and relinks plugin native code.
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      # `assembleDebug` signs with the pinned anki-debug.keystore via
+      # the signingConfigs block in android/app/build.gradle, producing:
+      #   android/app/build/outputs/apk/debug/app-debug.apk
+      # That's the file you sideload.
+      - name: Build debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Locate APK
+        id: apk
+        run: |
+          APK=$(find android/app/build/outputs/apk/debug -name '*.apk' | head -1)
+          if [ -z "$APK" ]; then
+            echo "no APK produced"
+            exit 1
+          fi
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          ls -lh "$APK"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          # install-android.sh fetches the artifact by this name.
+          name: oss-anki-debug-apk
+          path: ${{ steps.apk.outputs.path }}
+          retention-days: 14
+          if-no-files-found: error
