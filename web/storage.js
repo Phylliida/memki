@@ -40,3 +40,4 @@ export const deleteNoteHistory = (...a) => impl.deleteNoteHistory(...a);
 // File-backend extras: no-ops under IndexedDB (which writes through already).
 export const flushStore = isNative ? (...a) => fileStore.flushStore(...a) : async () => {};
 export const storeStamp = isNative ? (...a) => fileStore.storeStamp(...a) : () => 0;
+export const storeDirty = isNative ? (db) => !!db?.dirty : () => false;

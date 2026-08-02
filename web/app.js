@@ -20,7 +20,7 @@ import {
   openCollectionDB, loadCollection, saveCollection,
   putCard, putNote, putRevlog, putMeta, saveMedia, loadMedia, clearAll, deleteCards, deleteNoteAndCards, deleteRevlog,
   pushNoteHistory, listNoteHistory, deleteNoteHistory,
-  isNative, flushStore, storeStamp,
+  isNative, flushStore, storeStamp, storeDirty,
 } from "./storage.js";
 
 const SQL_CDN = new URL("../vendor/sqljs/", import.meta.url).href;
@@ -2679,6 +2679,7 @@ async function doBackup() {
     const { writeToFolder, textToBase64, folderLabel, BACKUP_FILE_NAME } = await import("./native-bridge.js");
     await writeToFolder(BACKUP_FILE_NAME, textToBase64(data));
     setStatus(`Backup written to ${BACKUP_FILE_NAME} in ${await folderLabel()}.`);
+    updateBackupButton();
     return;
   }
   const name = `oss-anki-backup-${new Date().toISOString().slice(0, 10)}.json`;
@@ -2708,6 +2709,7 @@ async function autoBackup() {
     const data = JSON.stringify(collectionToBackup(state.col, state.media));
     await writeToFolder(BACKUP_FILE_NAME, textToBase64(data));
     console.log(`auto-backup wrote ${BACKUP_FILE_NAME}`);
+    updateBackupButton();
   } catch (e) {
     console.error("auto-backup failed:", e);
   } finally {
@@ -2768,33 +2770,50 @@ async function doImport(file) {
   }
 }
 
-async function doExport() {
-  setStatus("Exporting…");
+// --- export (.apkg, one deck at a time) ---
+
+function doExport() {
+  const decks = Object.values(state.col.decks).sort((a, b) => a.name.localeCompare(b.name));
+  const { close } = openModal([
+    el("h3", {}, "Export which deck?"),
+    ...decks.map((d) => el("button", {
+      class: "deck-pick",
+      onclick: () => { close(); exportDeck(d); },
+    }, d.name)),
+  ]);
+}
+
+async function exportDeck(deck) {
   try {
-    const { exportPackage } = await import("../src/apkg.js");
+    const { exportPackage, collectionForDeck } = await import("../src/apkg.js");
     const SQL = await loadSql();
-    const bytes = exportPackage(state.col, state.media, { SQL });
+    const sub = collectionForDeck(state.col, deck.id);
+    // Only ship the media actually referenced by this deck's notes.
+    const media = new Map();
+    for (const n of sub.notes.values()) {
+      for (const f of n.fields) {
+        for (const m of scanMdMedia(f)) {
+          const blob = state.media.get(m.name);
+          if (blob) media.set(m.name, blob);
+        }
+      }
+    }
+    const bytes = exportPackage(sub, media, { SQL });
+    const name = `${deck.name.replaceAll("::", "-").replace(/[\/\\:*?"<>|]/g, "_")}.apkg`;
     if (isNative) {
       // "Save as" picker — user chooses location + file name.
       const { exportFile, bytesToBase64 } = await import("./native-bridge.js");
-      const name = `oss-anki-export-${new Date().toISOString().slice(0, 10)}.apkg`;
       await exportFile(name, bytesToBase64(bytes), "application/zip"); // .apkg is a zip
-      setStatus("Exported.");
       return;
     }
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([bytes]));
-    a.download = "oss-anki-export.apkg";
+    a.download = name;
     a.click();
     URL.revokeObjectURL(a.href);
-    setStatus("Exported.");
   } catch (e) {
-    if (/cancelled/i.test(e?.message ?? "")) {
-      setStatus("Export cancelled.");
-      return;
-    }
-    setStatus(`Export failed: ${e.message}`);
-    console.error(e);
+    if (/cancelled/i.test(e?.message ?? "")) return; // save-as picker dismissed
+    console.error("export failed:", e);
   }
 }
 
@@ -2819,6 +2838,7 @@ async function reloadFromSaveFile(statusMsg) {
   state.mediaUrls.clear();
   state.card = null;
   state.lastAction = null;
+  recordFileEvent("loaded");
   setStatus(statusMsg);
   renderDecks();
 }
@@ -2853,8 +2873,69 @@ async function onNativeResume() {
   }
 }
 
+/**
+ * Grey out Backup once oss-anki-backup.json already covers the current
+ * save file: enabled when there are unflushed edits, when the save file
+ * is newer than the backup, or when no backup exists yet. Native only —
+ * the browser Backup (a download) is always enabled.
+ */
+async function updateBackupButton() {
+  const btn = document.getElementById("btn-backup");
+  if (!isNative || !state.db) { btn.disabled = false; return; }
+  try {
+    const { statSaveFile, statInFolder, BACKUP_FILE_NAME } = await import("./native-bridge.js");
+    const [save, bak] = await Promise.all([statSaveFile(), statInFolder(BACKUP_FILE_NAME)]);
+    btn.disabled = !storeDirty(state.db)
+      && save.exists && bak.exists && bak.modified >= save.modified;
+  } catch {
+    btn.disabled = false; // can't tell → leave it usable
+  }
+}
+
+// --- save/load history (native) ---
+
+// Ring buffer of the last 20 file events ({ t, kind: "saved"|"loaded" }),
+// persisted so the History popup covers previous app launches too.
+const FILE_HISTORY_KEY = "fileHistory";
+const FILE_HISTORY_MAX = 20;
+
+function fileHistory() {
+  try { return JSON.parse(localStorage.getItem(FILE_HISTORY_KEY)) ?? []; } catch { return []; }
+}
+
+function recordFileEvent(kind, t = Date.now()) {
+  const log = fileHistory();
+  log.push({ t, kind });
+  while (log.length > FILE_HISTORY_MAX) log.shift();
+  try { localStorage.setItem(FILE_HISTORY_KEY, JSON.stringify(log)); } catch { /* quota — drop it */ }
+}
+
+/** "14:03:22" today, "Aug 1, 14:03:22" on other days. */
+function fmtEventTime(t) {
+  const d = new Date(t);
+  const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  if (d.toDateString() === new Date().toDateString()) return hm;
+  return `${d.toLocaleDateString([], { month: "short", day: "numeric" })}, ${hm}`;
+}
+
+function showHistory() {
+  const log = fileHistory();
+  const last = (kind) => log.findLast((e) => e.kind === kind);
+  const saved = last("saved");
+  const loaded = last("loaded");
+  openModal([
+    el("h3", {}, "Save / load history"),
+    el("div", {}, `Last saved: ${saved ? fmtEventTime(saved.t) : "never"}`),
+    el("div", {}, `Last loaded: ${loaded ? fmtEventTime(loaded.t) : "never"}`),
+    ...(log.length ? [el("hr")] : []),
+    ...log.slice().reverse().map((e) =>
+      el("div", { class: "muted" }, `${fmtEventTime(e.t)} — ${e.kind}`)),
+  ]);
+}
+
 async function wireNative() {
   document.getElementById("btn-folder").hidden = false;
+  document.getElementById("btn-history").hidden = false;
   updateFolderButton();
   const { watchAppState } = await import("./native-bridge.js");
   watchAppState({
@@ -2862,10 +2943,17 @@ async function wireNative() {
       flushStore(state.db)?.catch?.((e) => console.error("pause flush failed:", e));
       autoBackup();
     },
-    onResume: () => onNativeResume(),
+    onResume: () => { onNativeResume(); updateBackupButton(); },
   });
   window.addEventListener("beforeunload", () => { flushStore(state.db); });
   setInterval(autoBackup, AUTO_BACKUP_INTERVAL_MS);
+  updateBackupButton();
+  // Poor-man's file watcher: pick up external edits (Syncthing delivering
+  // changes made on another device, etc.) so the app stays up to date while
+  // it sits open, and keep the Backup button's greyed-out state in step.
+  // Same last-writer-wins rule as onNativeResume — pending local edits
+  // flush first.
+  setInterval(() => { onNativeResume(); updateBackupButton(); }, 3 * 1000);
 }
 
 function wireHeader() {
@@ -2895,6 +2983,7 @@ function wireHeader() {
   });
   document.getElementById("btn-export").addEventListener("click", doExport);
   document.getElementById("btn-backup").addEventListener("click", doBackup);
+  document.getElementById("btn-history").addEventListener("click", showHistory);
   document.getElementById("btn-folder").addEventListener("click", onChangeFolder);
 }
 
@@ -2921,12 +3010,14 @@ function wireKeyboard() {
 
 async function init() {
   state.db = await openCollectionDB();
+  state.db.onFileEvent = (kind, t) => recordFileEvent(kind, t); // native file store only
   state.col = await loadCollection(state.db);
   if (!state.col) {
     state.col = Collection.createDefault();
     await saveCollection(state.db, state.col);
   }
   state.media = await loadMedia(state.db);
+  if (isNative) recordFileEvent("loaded");
   sanitizeCurModel(state.col); // a stale curModel (e.g. from an import) would break Add Card
   // One-time migration: convert any legacy HTML fields to markdown.
   const { migrateCollectionToMarkdown } = await import("../src/html-to-md.js");

@@ -94,6 +94,11 @@ export async function statSaveFile() {
   return plugin().statFile({ name: SAVE_FILE_NAME });
 }
 
+/** Stat an arbitrary file in the save folder (e.g. BACKUP_FILE_NAME). */
+export async function statInFolder(name) {
+  return plugin().statFile({ name });
+}
+
 /** Write an arbitrary file (backup .json) into the save folder. */
 export async function writeToFolder(name, base64) {
   return plugin().writeFile({ name, data: base64 });

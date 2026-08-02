@@ -386,3 +386,48 @@ export function exportPackage(collection, media = new Map(), { SQL } = {}) {
 
   return zipSync(entries);
 }
+
+/**
+ * Build a Collection holding a single deck (and its subdecks — same rule
+ * as removeDeck): only those decks, their cards, the notes behind those
+ * cards, the note types those notes use, the deck options they reference,
+ * and the revlog for those cards. Used by single-deck export.
+ * Shares (not copies) the Note/Card objects — treat the result as read-only.
+ * @param {Collection} col
+ * @param {number} deckId
+ * @returns {Collection}
+ */
+export function collectionForDeck(col, deckId) {
+  const deck = col.decks[String(deckId)];
+  if (!deck) throw new Error(`no deck with id ${deckId}`);
+  const prefix = `${deck.name}::`;
+  const deckIds = new Set([Number(deckId)]);
+  for (const d of Object.values(col.decks)) if (d.name.startsWith(prefix)) deckIds.add(d.id);
+
+  const out = new Collection();
+  out.crt = col.crt;
+  out.mod = col.mod;
+  out.scm = col.scm;
+  out.conf = col.conf;
+
+  for (const [id, d] of Object.entries(col.decks)) if (deckIds.has(Number(id))) out.decks[id] = d;
+  const cardIds = new Set();
+  for (const c of col.cards.values()) {
+    if (!deckIds.has(c.did)) continue;
+    out.cards.set(c.id, c);
+    cardIds.add(c.id);
+  }
+  const mids = new Set();
+  for (const c of out.cards.values()) {
+    const n = col.notes.get(c.nid);
+    if (!n) continue;
+    out.notes.set(n.id, n);
+    mids.add(String(n.mid));
+  }
+  for (const [id, m] of Object.entries(col.models)) if (mids.has(id)) out.models[id] = m;
+  out.revlog = col.revlog.filter((r) => cardIds.has(r.cid));
+  const confIds = new Set(Object.values(out.decks).map((d) => String(d.conf)));
+  for (const [id, dc] of Object.entries(col.dconf)) if (confIds.has(id)) out.dconf[id] = dc;
+  for (const n of out.notes.values()) for (const t of n.tags) out.tags[t] = col.tags[t] ?? 0;
+  return out;
+}

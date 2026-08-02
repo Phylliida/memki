@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { importPackage, exportPackage } from "../src/apkg.js";
+import { importPackage, exportPackage, collectionForDeck } from "../src/apkg.js";
 import { initSqlJsNode } from "../src/sqljs-node.js";
 import { unzipSync } from "fflate";
 import { Collection, Note, Card, NoteTypeKind, writeCardFlags } from "../src/model.js";
@@ -80,6 +80,33 @@ test("a from-scratch collection exports and re-imports", () => {
   assert.deepEqual(back.tags, ["geo"]);
   assert.equal(back.csum, note.csum);
   assert.equal(Object.values(round.models)[0].name, "Basic");
+});
+
+test("single-deck export ships only that deck (with subdecks)", () => {
+  const col = Collection.createDefault();
+  const mid = Object.values(col.models)[0].id;
+  const add = (did, front) => {
+    const note = new Note({ mid, fields: [front, "x"] }).normalize();
+    col.addNote(note);
+    col.addCard(new Card({ nid: note.id, did }));
+  };
+  const geo = col.addDeck("Geo");
+  const geoCap = col.addDeck("Geo::Capitals");
+  add(1, "in default");            // Default deck — excluded
+  add(geo.id, "geo root");         // included
+  add(geoCap.id, "geo subdeck");   // subdeck — included
+
+  const sub = collectionForDeck(col, geo.id);
+  assert.equal(sub.notes.size, 2);
+  assert.equal(sub.cards.size, 2);
+  assert.deepEqual(Object.values(sub.decks).map((d) => d.name).sort(), ["Geo", "Geo::Capitals"]);
+
+  const round = importPackage(exportPackage(sub, new Map(), { SQL }), { SQL }).collection;
+  assert.equal(round.notes.size, 2);
+  assert.equal(round.cards.size, 2);
+  const fronts = [...round.notes.values()].map((n) => n.fields[0]).sort();
+  assert.deepEqual(fronts, ["geo root", "geo subdeck"]);
+  assert.deepEqual(Object.values(round.decks).map((d) => d.name).sort(), ["Geo", "Geo::Capitals"]);
 });
 
 test("markdown fields export as HTML with recomputed csum/sfld", () => {

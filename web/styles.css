@@ -44,7 +44,7 @@ header.menu-open .actions { flex-basis: 100%; margin-left: 0; }
 
 main {
   flex: 1;
-  padding: 24px 24px;
+  padding: 12px 24px;
   max-width: 1200px;
   width: 100%;
   margin: 0 auto;
@@ -276,6 +276,8 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 }
 .modal-panel h3 { margin: 0; font-size: 16px; }
 .modal-panel .row { display: flex; gap: 8px; justify-content: flex-end; }
+/* Deck picker in the export modal: full-width, left-aligned, stacked. */
+.deck-pick { text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Save-folder gate (Android first run): blocking overlay, mirrors the modal look. */
 .folder-gate {

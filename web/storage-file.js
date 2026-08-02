@@ -86,6 +86,7 @@ export async function flushStore(db) {
     try {
       const { modified } = await db.bridge.write(textToBase64(text));
       db.lastStamp = modified;
+      db.onFileEvent?.("saved", modified); // app.js save/load history log
       if (db.epoch === epoch) db.dirty = false;
     } finally {
       db.writing = null;
