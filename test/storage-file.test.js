@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 
 import {
   openCollectionDB, saveCollection, loadCollection, putCard, putNote, putRevlog,
-  saveMedia, loadMedia, clearAll, pushNoteHistory, listNoteHistory,
+  saveMedia, loadMedia, loadMediaNames, clearAll, pushNoteHistory, listNoteHistory,
   deleteNoteHistory, deleteNoteAndCards, flushStore, storeStamp,
 } from "../web/storage-file.js";
 import { Collection, Note, Card, Revlog } from "../src/model.js";
@@ -16,15 +16,21 @@ import { collectionToBackup } from "../src/backup.js";
 function mockBridge() {
   let content = null; // base64 of the file bytes
   let mtime = 0;
+  const mediaFiles = new Map(); // name -> base64 (the oss-anki.media/ folder)
   return {
     async read() { return content; },
     async write(b64) { content = b64; mtime += 1000; return { modified: mtime }; },
     async stat() { return { exists: content != null, modified: mtime }; },
+    async readMedia(name) { return mediaFiles.get(name) ?? null; },
+    async writeMedia(name, b64) { mediaFiles.set(name, b64); },
+    mediaFiles,
     // Test helpers: simulate an external (e.g. Syncthing) write.
     externalWrite(b64) { content = b64; mtime += 1000; },
     raw() { return content; },
   };
 }
+
+const fileJson = (raw) => JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
 
 function sampleCollection() {
   const col = Collection.createDefault();
@@ -52,6 +58,9 @@ test("save, flush, reopen: collection + media round trip", async () => {
 
   assert.ok(bridge.raw(), "file was written");
   assert.ok(storeStamp(db) > 0);
+  // Media is NOT in the JSON — it went to a sibling file.
+  assert.deepEqual(fileJson(bridge.raw()).media, {});
+  assert.ok(bridge.mediaFiles.has("pic.png"));
 
   const db2 = await openCollectionDB(bridge);
   const back = await loadCollection(db2);
@@ -64,8 +73,29 @@ test("save, flush, reopen: collection + media round trip", async () => {
   assert.ok(note instanceof Note);
   assert.deepEqual(note.fields, ["2+2", "4"]);
   assert.deepEqual(note.tags, ["demo"]);
-  const media = await loadMedia(db2);
+  // Media comes back lazily, by name.
+  const media = await loadMediaNames(db2, ["pic.png", "missing.png"]);
   assert.deepEqual([...media.get("pic.png")], [1, 2, 3, 250]);
+  assert.equal(media.size, 1); // missing names are skipped
+});
+
+test("legacy save file with embedded media is migrated to sibling files", async () => {
+  const bridge = mockBridge();
+  const col = sampleCollection();
+  // The pre-split format: media base64-embedded in the JSON.
+  const legacy = collectionToBackup(col, new Map([["old.png", new Uint8Array([7, 7])]]));
+  legacy.history = {};
+  bridge.externalWrite(Buffer.from(JSON.stringify(legacy), "utf8").toString("base64"));
+
+  const db = await openCollectionDB(bridge);
+  const back = await loadCollection(db);
+  assert.equal(back.notes.size, 2);
+  // Moved out to a sibling file, readable by name…
+  const media = await loadMediaNames(db, ["old.png"]);
+  assert.deepEqual([...media.get("old.png")], [7, 7]);
+  // …and the rewrite drops it from the JSON.
+  await flushStore(db);
+  assert.deepEqual(fileJson(bridge.raw()).media, {});
 });
 
 test("incremental puts after in-app mutation are persisted", async () => {

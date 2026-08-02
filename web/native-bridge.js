@@ -86,6 +86,9 @@ export async function getSaveFileBridge() {
     read: async () => (await p.readFile({ name })).data ?? null,
     write: async (data) => p.writeFile({ name, data }),
     stat: async () => p.statFile({ name }),
+    // Media: individual files in the oss-anki.media/ subfolder.
+    readMedia: async (mediaName) => (await p.readMedia({ name: mediaName })).data ?? null,
+    writeMedia: async (mediaName, data) => p.writeMedia({ name: mediaName, data }),
   };
 }
 

@@ -1,24 +1,23 @@
 // Browser-side counterpart to native-bridge.js, for desktop Chrome/Edge:
 // uses the File System Access API so the web app can live on a user-chosen
-// JSON save file (same storage-file.js backend as the Android app), instead
-// of IndexedDB. Pick the same oss-anki.json your phone syncs via Syncthing
-// and both devices edit one file.
+// save folder (same storage-file.js backend as the Android app), instead
+// of IndexedDB. Pick the folder your phone syncs via Syncthing and both
+// devices edit the same oss-anki.json (+ oss-anki.media/) files.
 //
-// Permission model: the file handle is stored in IndexedDB and survives
-// restarts, so the file is picked once, ever. Write permission persists
-// for the session; a fresh browser session may need ONE click (the gate
-// button doubles as the required user gesture). Installed-as-PWA on
-// Chrome 122+ can get a fully persistent grant ("allow on every visit").
+// Permission model: the directory handle is stored in IndexedDB and
+// survives restarts, so the folder is picked once, ever. Write permission
+// persists for the session; a fresh browser session may need ONE click
+// (the gate button doubles as the required user gesture). Installed-as-PWA
+// on Chrome 122+ can get a fully persistent grant ("allow on every visit").
 //
 // Exports intentionally mirror the names app.js uses from native-bridge.js
 // (ensureSaveFolder / getSaveFileBridge / pickSaveFolder / folderLabel /
 // statSaveFile) so callers just dispatch on platform.
 
 export const SAVE_FILE_NAME = "oss-anki.json";
+const MEDIA_DIR = "oss-anki.media";
 
-const JSON_TYPE = { description: "JSON", accept: { "application/json": [".json"] } };
-
-// The picked FileSystemFileHandle, cached in memory + persisted in IndexedDB.
+// The picked FileSystemDirectoryHandle, cached in memory + IndexedDB.
 let cachedHandle;
 
 // --- tiny IndexedDB kv store (handles aren't JSON-serializable, so not localStorage) ---
@@ -55,13 +54,15 @@ async function loadHandle() {
   } catch {
     cachedHandle = null;
   }
+  // Legacy: pre-media-split versions stored a single FILE handle. Force a
+  // one-time re-pick of the folder containing it.
+  if (cachedHandle && cachedHandle.kind !== "directory") cachedHandle = null;
   return cachedHandle;
 }
 
 // --- base64 helpers (the bridge contract speaks base64) ---
 
-function textToBase64(text) {
-  const bytes = new TextEncoder().encode(text);
+function bytesToBase64(bytes) {
   let bin = "";
   for (let i = 0; i < bytes.length; i += 0x8000) {
     bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -76,36 +77,64 @@ function base64ToBytes(b64) {
   return bytes;
 }
 
-/** Open-existing or create-new picker. Throws AbortError when cancelled. */
-async function pickFile(create) {
-  const h = create
-    ? await showSaveFilePicker({ suggestedName: SAVE_FILE_NAME, types: [JSON_TYPE] })
-    : (await showOpenFilePicker({ types: [JSON_TYPE], multiple: false }))[0];
-  await saveHandle(h);
+async function fileBase64(fileHandle) {
+  const f = await fileHandle.getFile();
+  if (f.size === 0) return null;
+  return bytesToBase64(new Uint8Array(await f.arrayBuffer()));
 }
 
-/** Human-readable label for the chosen file ("" when none). */
+async function writeFileBase64(fileHandle, b64) {
+  // Chrome stages createWritable() in a swap file and moves it over the
+  // target on close — partial writes aren't observable.
+  const w = await fileHandle.createWritable();
+  await w.write(base64ToBytes(b64));
+  await w.close();
+  return { modified: (await fileHandle.getFile()).lastModified };
+}
+
+async function mediaDir(create) {
+  const dir = await loadHandle();
+  if (!dir) return null;
+  try {
+    return await dir.getDirectoryHandle(MEDIA_DIR, { create });
+  } catch {
+    return null; // NotFoundError when create=false and no media yet
+  }
+}
+
+/** Human-readable label for the chosen folder ("" when none). */
 export async function folderLabel() {
   return (await loadHandle())?.name ?? "";
 }
 
 /** Stat the save file (for external-change detection on the poll). */
 export async function statSaveFile() {
-  const h = await loadHandle();
-  if (!h) return { exists: false, modified: 0, size: 0 };
+  const dir = await loadHandle();
+  if (!dir) return { exists: false, modified: 0, size: 0 };
   try {
-    const f = await h.getFile();
+    const fh = await dir.getFileHandle(SAVE_FILE_NAME);
+    const f = await fh.getFile();
     return { exists: true, modified: f.lastModified, size: f.size };
   } catch {
     return { exists: false, modified: 0, size: 0 }; // file moved/deleted
   }
 }
 
+/** Ask the user to pick a (new) save folder. Returns true when one was chosen. */
+export async function pickSaveFolder() {
+  try {
+    await saveHandle(await showDirectoryPicker({ mode: "readwrite" }));
+    return true;
+  } catch {
+    return false; // cancelled
+  }
+}
+
 /**
- * Make sure a save file is chosen AND writable. Fast path: stored handle
+ * Make sure a save folder is chosen AND writable. Fast path: stored handle
  * with a still-valid grant returns silently. Otherwise shows the blocking
  * gate — its button clicks are the user gesture requestPermission and the
- * pickers require.
+ * picker require.
  */
 export async function ensureSaveFolder() {
   const h = await loadHandle();
@@ -114,12 +143,6 @@ export async function ensureSaveFolder() {
   const gate = document.getElementById("folder-gate");
   const msg = document.getElementById("folder-gate-msg");
   const btn = document.getElementById("btn-pick-folder");
-  const newBtn = document.getElementById("btn-new-file");
-  gate.querySelector("h2").textContent = "Choose a save file";
-  gate.querySelector("p").textContent =
-    "oss-anki stores your whole collection as one JSON file you choose, and " +
-    "rewrites it as you study and edit. Pick a file your sync tool " +
-    "(Syncthing, …) watches to keep devices in sync.";
   gate.hidden = false;
   try {
     if (h) {
@@ -131,56 +154,44 @@ export async function ensureSaveFolder() {
         msg.textContent = "Permission not granted. Try again.";
       }
     }
-    btn.textContent = "Open existing file…";
-    newBtn.hidden = false;
     for (;;) {
-      const which = await new Promise((resolve) => {
-        btn.addEventListener("click", () => resolve("open"), { once: true });
-        newBtn.addEventListener("click", () => resolve("new"), { once: true });
-      });
-      try {
-        await pickFile(which === "new");
-        return;
-      } catch (e) {
-        if (e?.name !== "AbortError") {
-          msg.textContent = `No file chosen (${e?.message ?? e}). Try again.`;
-        }
-      }
+      await new Promise((resolve) => btn.addEventListener("click", resolve, { once: true }));
+      if (await pickSaveFolder()) return;
+      msg.textContent = "No folder chosen. Try again.";
     }
   } finally {
     gate.hidden = true;
-    newBtn.hidden = true;
   }
 }
 
-/** Ask the user to pick a (new) save file. Returns true when one was chosen. */
-export async function pickSaveFolder() {
-  try {
-    await pickFile(false);
-    return true;
-  } catch {
-    return false; // cancelled
-  }
-}
-
-/** Bridge for web/storage-file.js bound to the chosen save file. */
+/** Bridge for web/storage-file.js bound to the save file in the chosen folder. */
 export async function getSaveFileBridge() {
   await ensureSaveFolder();
-  const h = await loadHandle();
+  const dir = await loadHandle();
   return {
     read: async () => {
-      const f = await h.getFile();
-      if (f.size === 0) return null; // freshly created file → default collection
-      return textToBase64(await f.text());
+      try {
+        return await fileBase64(await dir.getFileHandle(SAVE_FILE_NAME));
+      } catch {
+        return null; // NotFoundError → fresh folder, default collection
+      }
     },
-    write: async (data) => {
-      // Chrome stages createWritable() in a swap file and moves it over the
-      // target on close — partial writes aren't observable.
-      const w = await h.createWritable();
-      await w.write(base64ToBytes(data));
-      await w.close();
-      return { modified: (await h.getFile()).lastModified };
-    },
+    write: async (data) =>
+      writeFileBase64(await dir.getFileHandle(SAVE_FILE_NAME, { create: true }), data),
     stat: statSaveFile,
+    // Media: individual files in the oss-anki.media/ subfolder.
+    readMedia: async (name) => {
+      const md = await mediaDir(false);
+      if (!md) return null;
+      try {
+        return await fileBase64(await md.getFileHandle(name));
+      } catch {
+        return null;
+      }
+    },
+    writeMedia: async (name, data) => {
+      const md = await mediaDir(true);
+      await writeFileBase64(await md.getFileHandle(name, { create: true }), data);
+    },
   };
 }

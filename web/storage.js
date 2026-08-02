@@ -35,6 +35,13 @@ export const putRevlog = (...a) => impl.putRevlog(...a);
 export const putMeta = (...a) => impl.putMeta(...a);
 export const saveMedia = (...a) => impl.saveMedia(...a);
 export const loadMedia = (...a) => impl.loadMedia(...a);
+/** Fetch specific media files by name (lazy cache fill; skipped when missing). */
+export const loadMediaNames = hasSaveFile
+  ? (...a) => fileStore.loadMediaNames(...a)
+  : async (db, names) => {
+      const all = await idbStore.loadMedia(db);
+      return new Map(names.filter((n) => all.has(n)).map((n) => [n, all.get(n)]));
+    };
 export const clearAll = (...a) => impl.clearAll(...a);
 export const deleteCards = (...a) => impl.deleteCards(...a);
 export const deleteNoteAndCards = (...a) => impl.deleteNoteAndCards(...a);

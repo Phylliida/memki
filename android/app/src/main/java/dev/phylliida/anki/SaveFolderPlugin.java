@@ -14,6 +14,9 @@
 //   readFile({ name })      -> { data: base64 | null }
 //   writeFile({ name, data: base64 }) -> { modified }  (atomic tmp+rename)
 //   statFile({ name })      -> { exists, modified, size }
+//   readMedia({ name })     -> { data: base64 | null }   } media lives in an
+//   writeMedia({ name, data: base64 }) -> { modified }   } "oss-anki.media"
+//                                                          } subfolder
 //   exportFile({ name, data: base64, mimeType }) -> { uri }
 //                             "save as" picker (ACTION_CREATE_DOCUMENT);
 //                             rejects "CANCELLED"
@@ -237,6 +240,80 @@ public class SaveFolderPlugin extends Plugin {
         if (name == null) return null;
         DocumentFile dir = tree();
         return dir != null ? dir.findFile(name) : null;
+    }
+
+    // ── Media files (oss-anki.media/ subfolder of the save folder) ──
+    private static final String MEDIA_DIR = "oss-anki.media";
+
+    private DocumentFile mediaDir(boolean create) {
+        DocumentFile dir = tree();
+        if (dir == null) return null;
+        DocumentFile d = dir.findFile(MEDIA_DIR);
+        if (d == null && create) d = dir.createDirectory(MEDIA_DIR);
+        return (d != null && d.isDirectory()) ? d : null;
+    }
+
+    @PluginMethod
+    public void readMedia(PluginCall call) {
+        String name = call.getString("name");
+        JSObject ret = new JSObject();
+        try {
+            DocumentFile dir = mediaDir(false);
+            DocumentFile file = dir != null && name != null ? dir.findFile(name) : null;
+            if (file == null) {
+                ret.put("data", JSObject.NULL);
+            } else {
+                ret.put("data", Base64.encodeToString(readAll(file), Base64.NO_WRAP));
+            }
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("media read failed: " + e.getMessage(), "IO", e);
+        }
+    }
+
+    @PluginMethod
+    public void writeMedia(PluginCall call) {
+        String name = call.getString("name");
+        String data = call.getString("data");
+        if (name == null || data == null) {
+            call.reject("need name and data", "BAD_INPUT");
+            return;
+        }
+        try {
+            DocumentFile dir = mediaDir(true);
+            if (dir == null) {
+                call.reject("no save folder chosen", "NO_FOLDER");
+                return;
+            }
+            byte[] bytes = Base64.decode(data, Base64.DEFAULT);
+            // Same tmp+rename dance as writeFile: file watchers (Syncthing)
+            // only ever see complete files.
+            String tmpName = name + ".tmp";
+            DocumentFile tmp = dir.findFile(tmpName);
+            if (tmp == null) tmp = dir.createFile("application/octet-stream", tmpName);
+            if (tmp == null) throw new java.io.IOException("could not create " + tmpName);
+            try (OutputStream out = getContext().getContentResolver()
+                    .openOutputStream(tmp.getUri(), "wt")) {
+                if (out == null) throw new java.io.IOException("no output stream for " + tmpName);
+                out.write(bytes);
+            }
+            DocumentFile target = dir.findFile(name);
+            if (target != null) target.delete();
+            if (!tmp.renameTo(name)) {
+                DocumentFile fallback = dir.createFile("application/octet-stream", name);
+                try (OutputStream out = getContext().getContentResolver()
+                        .openOutputStream(fallback.getUri(), "wt")) {
+                    out.write(bytes);
+                }
+                tmp.delete();
+            }
+            DocumentFile written = dir.findFile(name);
+            JSObject ret = new JSObject();
+            ret.put("modified", written != null ? written.lastModified() : System.currentTimeMillis());
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("media write failed: " + e.getMessage(), "IO", e);
+        }
     }
 
     private byte[] readAll(DocumentFile file) throws java.io.IOException {

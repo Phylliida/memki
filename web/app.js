@@ -18,7 +18,7 @@ import { Rating } from "../src/fsrs.js";
 import { stripHtml, stripHtmlPreservingMediaFilenames } from "../src/text.js";
 import {
   openCollectionDB, loadCollection, saveCollection,
-  putCard, putNote, putRevlog, putMeta, saveMedia, loadMedia, clearAll, deleteCards, deleteNoteAndCards, deleteRevlog,
+  putCard, putNote, putRevlog, putMeta, saveMedia, loadMedia, loadMediaNames, clearAll, deleteCards, deleteNoteAndCards, deleteRevlog,
   pushNoteHistory, listNoteHistory, deleteNoteHistory,
   isNative, hasSaveFile, flushStore, storeStamp, storeDirty,
 } from "./storage.js";
@@ -28,7 +28,7 @@ const SQL_CDN = new URL("../vendor/sqljs/", import.meta.url).href;
 const state = {
   db: null,
   col: null,
-  media: new Map(),
+  media: new Map(), // cache: complete on IndexedDB, lazily filled on file-backed stores
   mediaUrls: new Map(),
   deckId: null,
   card: null,
@@ -199,7 +199,12 @@ function mdEditor(initial = "") {
   /** An atomic widget for a media token, or null to leave it as plain text. */
   const widgetFor = (tok) => {
     const url = mediaUrl(tok.name);
-    if (!url) return null; // media not in the store — keep it editable text
+    if (!url) {
+      // File-backed stores load media lazily — fetch it, then re-tokenize
+      // so the plain text becomes a widget once the bytes arrive.
+      ensureMedia([tok.name]).then(scheduleRetokenize);
+      return null;
+    }
     let inner;
     if (tok.kind === "img") {
       inner = el("img", { src: url, alt: tok.raw });
@@ -634,6 +639,45 @@ function mediaUrl(name) {
   return state.mediaUrls.get(name);
 }
 
+// --- lazy media loading ---
+// state.media is a CACHE on file-backed stores (Android / desktop FS
+// Access): media lives as individual files in oss-anki.media/ and is
+// fetched by name on first use, so multi-GB collections never sit in
+// memory. On IndexedDB browsers the cache holds everything (as before).
+
+const mediaLoading = new Set(); // in-flight fetches, to dedup concurrent loads
+
+/** Fetch media files into the cache by name (missing names are skipped). */
+async function ensureMedia(names) {
+  const missing = [...new Set(names)].filter((n) => n && !state.media.has(n) && !mediaLoading.has(n));
+  if (!missing.length) return;
+  missing.forEach((n) => mediaLoading.add(n));
+  try {
+    const loaded = await loadMediaNames(state.db, missing);
+    for (const [n, b] of loaded) state.media.set(n, b);
+  } finally {
+    missing.forEach((n) => mediaLoading.delete(n));
+  }
+}
+
+/** Media names referenced by rendered field HTML (<img src> + [sound:] tags). */
+function mediaNamesInHtml(html) {
+  const tpl = document.createElement("template");
+  tpl.innerHTML = html;
+  const names = [];
+  for (const node of tpl.content.querySelectorAll("img, audio, video, source")) {
+    const src = node.getAttribute("src");
+    if (src) names.push(safeDecode(src));
+  }
+  for (const m of html.matchAll(/\[sound:([^\]]+)\]/g)) names.push(m[1].trim());
+  return names;
+}
+
+/** Media names referenced by an image-occlusion note (bare image filename + back extra). */
+function mediaNamesInIONote(note) {
+  return [note.fields[0], ...scanMdMedia(note.fields[3] || "").map((t) => t.name)];
+}
+
 function resolveMedia(html) {
   // Parse properly (the browser's parser, not a regex): quoted values with
   // spaces, entity encoding, and attribute order are all handled correctly.
@@ -949,8 +993,11 @@ function renderStudy() {
   state.qShownAt = Date.now(); // for revlog answer-duration tracking
   const showAnswerBtn = el("button", { class: "show-answer", onclick: () => showAnswer() }, "Show Answer");
   if (noteType.ossIO) {
-    show(back, occlusionFace(note, card.ord, "q"), showAnswerBtn, reviewMoreBar());
-    wireSoundVolumes();
+    ensureMedia(mediaNamesInIONote(note)).then(() => {
+      if (state.card !== card) return; // moved on while media loaded
+      show(back, occlusionFace(note, card.ord, "q"), showAnswerBtn, reviewMoreBar());
+      wireSoundVolumes();
+    });
     return;
   }
   applyModelCss(noteType);
@@ -958,11 +1005,14 @@ function renderStudy() {
     deckName: deckName(card.did), flag: card.flags & 7,
   });
 
-  show(back, cardFace(question), showAnswerBtn, reviewMoreBar());
-  autoplayFirstMedia(card);
-  typesetMath();
-  // Focus a type-in-the-answer box if the template has one.
-  view().querySelector("#typeans")?.focus();
+  ensureMedia(mediaNamesInHtml(question)).then(() => {
+    if (state.card !== card || state.answerShown) return; // stale prefetch
+    show(back, cardFace(question), showAnswerBtn, reviewMoreBar());
+    autoplayFirstMedia(card);
+    typesetMath();
+    // Focus a type-in-the-answer box if the template has one.
+    view().querySelector("#typeans")?.focus();
+  });
 }
 
 function showAnswer() {
@@ -985,8 +1035,11 @@ function showAnswer() {
   const crumbs = el("div", { class: "crumbs", onclick: renderDecks }, "← Decks");
 
   if (noteType.ossIO) {
-    show(crumbs, occlusionFace(note, card.ord, "a"), controls, reviewMoreBar());
-    wireSoundVolumes();
+    ensureMedia(mediaNamesInIONote(note)).then(() => {
+      if (state.card !== card) return;
+      show(crumbs, occlusionFace(note, card.ord, "a"), controls, reviewMoreBar());
+      wireSoundVolumes();
+    });
     return;
   }
   applyModelCss(noteType);
@@ -994,9 +1047,12 @@ function showAnswer() {
   const { answer } = renderCard(noteType, card.ord, note, {
     typed, deckName: deckName(card.did), flag: card.flags & 7,
   });
-  show(crumbs, cardFace(answer), controls, reviewMoreBar());
-  autoplayFirstMedia(card);
-  typesetMath();
+  ensureMedia(mediaNamesInHtml(answer)).then(() => {
+    if (state.card !== card) return;
+    show(crumbs, cardFace(answer), controls, reviewMoreBar());
+    autoplayFirstMedia(card);
+    typesetMath();
+  });
 }
 
 async function gradeCard(rating) {
@@ -1182,7 +1238,7 @@ function renderAddCard() {
 
   // Live preview: the actual card(s) this note will create, as you type.
   const previewBox = el("div", { class: "preview-box" });
-  const updatePreview = () => {
+  const updatePreview = async () => {
     const model = state.col.noteType(Number(modelSel.value)) ?? models[0];
     if (!model) { previewBox.replaceChildren(); return; }
     const fields = inputs.map((ed) => ed.getText());
@@ -1196,6 +1252,7 @@ function renderAddCard() {
     const { question, answer } = renderCard(model, ords[0], tmpNote, {
       deckName: decks.find((d) => String(d.id) === deckSel.value)?.name ?? "",
     });
+    await ensureMedia([...mediaNamesInHtml(question), ...mediaNamesInHtml(answer)]);
     previewBox.replaceChildren(
       el("div", { class: "muted pv-count" },
         `Will create ${ords.length} card${ords.length > 1 ? "s" : ""} · previewing "${model.tmpls[model.type === NoteTypeKind.Cloze ? 0 : ords[0]]?.name ?? ""}"`),
@@ -1850,11 +1907,13 @@ function noteEditorForm(noteId, cb = {}) {
   // Preview modal (centered, like Change note type): the note's first card
   // rendered front + back through the real pipeline, live-updated while open.
   let pvBox = null; // content container while the modal is open
-  const updatePvPop = () => {
+  const updatePvPop = async () => {
     if (!pvBox) return;
     if (model.ossIO) {
       // Image occlusion notes render their own face (fields are image + mask
       // JSON, edited by the occlusion tool — preview the saved note).
+      await ensureMedia(mediaNamesInIONote(note));
+      if (!pvBox) return; // modal closed while media loaded
       pvBox.replaceChildren(occlusionFace(note, 0, "q"));
       wireSoundVolumes(pvBox);
       return;
@@ -1869,6 +1928,8 @@ function noteEditorForm(noteId, cb = {}) {
     applyModelCss(model);
     const deckName = state.col.decks[String(state.col.cardsForNote(note.id)[0]?.did ?? 1)]?.name ?? "";
     const { question, answer } = renderCard(model, ords[0], tmpNote, { deckName });
+    await ensureMedia([...mediaNamesInHtml(question), ...mediaNamesInHtml(answer)]);
+    if (!pvBox) return; // modal closed while media loaded
     pvBox.replaceChildren(
       el("div", { class: "muted pv-count" },
         `Previewing "${model.tmpls[model.type === NoteTypeKind.Cloze ? 0 : ords[0]]?.name ?? ""}"`),
@@ -2554,7 +2615,7 @@ function renderEditNoteType(mid) {
   // Live preview: render a real note of this type (or field-name placeholders)
   // through the templates as they are edited — including the CSS box.
   const previewBox = el("div", { class: "preview-box" });
-  const updatePreview = () => {
+  const updatePreview = async () => {
     const tmpNt = {
       ...nt,
       css: cssArea.value,
@@ -2569,6 +2630,7 @@ function renderEditNoteType(mid) {
       if (!t) continue;
       try {
         const { question, answer } = renderCard(tmpNt, isCloze ? 0 : t.ord, sample, { deckName: "Deck" });
+        await ensureMedia([...mediaNamesInHtml(question), ...mediaNamesInHtml(answer)]);
         parts.push(
           el("div", { class: "muted pv-count" }, t.name),
           el("div", { class: "pv-pair" },
@@ -2673,7 +2735,10 @@ async function loadSql() {
 async function doBackup() {
   await flushStore(state.db); // land pending edits first, so the recorded stamp covers them
   const { collectionToBackup } = await import("../src/backup.js");
-  const data = JSON.stringify(collectionToBackup(state.col, state.media));
+  // File-backed stores keep media as sibling files next to the save file
+  // (synced along by Syncthing & co.), so the backup JSON is text-only.
+  // IndexedDB browsers embed media in the backup as before.
+  const data = JSON.stringify(collectionToBackup(state.col, hasSaveFile ? undefined : state.media));
   if (isNative) {
     // No anchor-download in the Capacitor WebView — write into the save folder.
     // Same fixed name as the automatic backup: always overwritten.
@@ -2711,7 +2776,8 @@ async function autoBackup() {
     await flushStore(state.db); // land pending edits so the stamp covers them
     const { collectionToBackup } = await import("../src/backup.js");
     const { writeToFolder, textToBase64, BACKUP_FILE_NAME } = await import("./native-bridge.js");
-    const data = JSON.stringify(collectionToBackup(state.col, state.media));
+    // Text-only: media lives as sibling files in the same synced folder.
+    const data = JSON.stringify(collectionToBackup(state.col));
     await writeToFolder(BACKUP_FILE_NAME, textToBase64(data));
     console.log(`auto-backup wrote ${BACKUP_FILE_NAME}`);
     recordBackupStamp();
@@ -2733,7 +2799,9 @@ async function doRestore(file) {
     migrateCollectionToMarkdown(collection);
     sanitizeCurModel(collection);
     state.col = collection;
-    state.media = media;
+    // File-backed: media was written to sibling files by saveMedia below;
+    // keep the cache empty and let it refill lazily.
+    state.media = hasSaveFile ? new Map() : media;
     state.mediaUrls.clear();
     await clearAll(state.db);
     await saveCollection(state.db, collection);
@@ -2763,7 +2831,9 @@ async function doImport(file) {
     const { collection, media } = importPackage(buf, { SQL });
 
     const r = mergeCollection(state.col, collection);
-    for (const [name, bytes] of media) state.media.set(name, bytes);
+    // File-backed: saveMedia below writes sibling files; the cache refills
+    // lazily. IndexedDB: keep the cache complete (it IS the media store view).
+    if (!hasSaveFile) for (const [name, bytes] of media) state.media.set(name, bytes);
     state.mediaUrls.clear();
     sanitizeCurModel(state.col);
     await saveCollection(state.db, state.col);
@@ -2794,15 +2864,18 @@ async function exportDeck(deck) {
     const { exportPackage, collectionForDeck } = await import("../src/apkg.js");
     const SQL = await loadSql();
     const sub = collectionForDeck(state.col, deck.id);
-    // Only ship the media actually referenced by this deck's notes.
-    const media = new Map();
+    // Only ship the media actually referenced by this deck's notes — fetch
+    // it into the cache first (file-backed stores load media lazily).
+    const names = [];
     for (const n of sub.notes.values()) {
-      for (const f of n.fields) {
-        for (const m of scanMdMedia(f)) {
-          const blob = state.media.get(m.name);
-          if (blob) media.set(m.name, blob);
-        }
-      }
+      if (state.col.noteType(n.mid)?.ossIO) names.push(n.fields[0]); // IO image: bare filename
+      for (const f of n.fields) for (const m of scanMdMedia(f)) names.push(m.name);
+    }
+    await ensureMedia(names);
+    const media = new Map();
+    for (const name of names) {
+      const blob = state.media.get(name);
+      if (blob) media.set(name, blob);
     }
     const bytes = exportPackage(sub, media, { SQL });
     const name = `${deck.name.replaceAll("::", "-").replace(/[\/\\:*?"<>|]/g, "_")}.apkg`;

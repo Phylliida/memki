@@ -9,11 +9,19 @@
 // debounced full-file rewrite (the app mutates the Collection object first,
 // then calls these puts — same contract as the IndexedDB backend).
 //
-// The bridge abstracts the actual file IO (native plugin on Android, a mock
-// in tests):
+// The bridge abstracts the actual file IO (native plugin on Android, the
+// File System Access API on desktop Chrome/Edge, a mock in tests):
 //   read()                -> Promise<string|null>  base64 file bytes, null if missing
 //   write(base64)         -> Promise<{modified:number}>  atomic replace (tmp+rename)
 //   stat()                -> Promise<{exists:boolean, modified:number}>
+//   readMedia(name)       -> Promise<string|null>  base64 media bytes, null if missing
+//   writeMedia(name, b64) -> Promise<void>
+//
+// Media does NOT live in the JSON: it's individual files in an
+// `oss-anki.media/` sibling folder, so reviewing a card rewrites only the
+// (small) text JSON and Syncthing only moves genuinely new media. Save files
+// written by older versions may still embed base64 media — loadCollection
+// migrates those out to files on first read.
 
 import { collectionToBackup, collectionFromBackup } from "../src/backup.js";
 
@@ -38,13 +46,27 @@ function base64ToText(b64) {
   return new TextDecoder().decode(bytes);
 }
 
+function bytesToBase64(bytes) {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
+}
+
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
 /** Open the file-backed store. The bridge must already point at a chosen file. */
 export async function openCollectionDB(bridge) {
   if (!bridge) throw new Error("file storage needs a bridge (no save folder chosen?)");
   return {
     bridge,
     col: null,          // Collection mirror (the same object the app mutates)
-    media: new Map(),   // filename -> Uint8Array
     history: new Map(), // nid -> [{ts, fields, tags}], oldest first
     dirty: false,
     epoch: 0,           // bumped by every markDirty; guards in-flight flushes
@@ -65,7 +87,8 @@ function markDirty(db) {
 }
 
 function serialize(db) {
-  const backup = collectionToBackup(db.col, db.media);
+  // No media in the JSON — it lives as sibling files (see header comment).
+  const backup = collectionToBackup(db.col);
   backup.history = Object.fromEntries(
     [...db.history].map(([nid, arr]) => [String(nid), arr]),
   );
@@ -109,16 +132,22 @@ export async function loadCollection(db, { force = false } = {}) {
   if (db.col && !force) return db.col;
   const b64 = await db.bridge.read();
   if (b64 == null) {
-    db.col = null; db.media = new Map(); db.history = new Map();
+    db.col = null; db.history = new Map();
     return null;
   }
   const obj = JSON.parse(base64ToText(b64));
   const { collection, media } = collectionFromBackup(obj);
   db.col = collection;
-  db.media = media;
   db.history = new Map(
     Object.entries(obj.history ?? {}).map(([nid, arr]) => [Number(nid), arr]),
   );
+  // One-time migration: save files from before the media split still embed
+  // base64 media — move it out to sibling files and rewrite the JSON
+  // without it (via the dirty flag).
+  if (media.size > 0) {
+    await saveMedia(db, media);
+    markDirty(db);
+  }
   const st = await db.bridge.stat();
   db.lastStamp = st.modified;
   return db.col;
@@ -161,21 +190,29 @@ export async function deleteNoteHistory(db, nid) {
   markDirty(db);
 }
 
-/** Merge media blobs into the store (filename -> Uint8Array). */
+/** Write media blobs as individual sibling files (filename -> Uint8Array). */
 export async function saveMedia(db, media) {
-  for (const [name, data] of media) db.media.set(name, data);
-  markDirty(db);
+  for (const [name, data] of media) await db.bridge.writeMedia(name, bytesToBase64(data));
 }
 
-/** All media (the live map — mutations are picked up by the next flush). */
+/** Fetch specific media files by name; missing ones are skipped. */
+export async function loadMediaNames(db, names) {
+  const out = new Map();
+  for (const name of names) {
+    const b64 = await db.bridge.readMedia(name);
+    if (b64 != null) out.set(name, base64ToBytes(b64));
+  }
+  return out;
+}
+
+/** The file backend never bulk-loads media — the app fetches lazily by name. */
 export async function loadMedia(db) {
-  return db.media;
+  return new Map();
 }
 
 /** Reset everything (used by "replace collection" on restore/import). */
 export async function clearAll(db) {
   db.col = null;
-  db.media = new Map();
   db.history = new Map();
   markDirty(db);
 }

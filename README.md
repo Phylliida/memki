@@ -72,17 +72,29 @@ The whole app runs fully offline. `.apkg` import/export lazily loads vendored
 sql.js + fflate + fzstd builds from `vendor/` (see the import map in
 `web/index.html`); MathJax is vendored there too.
 
-## Android app (Capacitor)
+## Android app (Capacitor) / desktop save file
 
-The same web app also runs as an Android app (Capacitor 6). On Android,
-persistence switches from IndexedDB to a **single JSON save file in a folder
-you choose**: on first launch you're asked to pick a folder (SAF picker), and
-the whole collection lives there as `oss-anki.json` — read at startup and
-rewritten (debounced, atomic tmp+rename) as you study and edit. Point a sync
-tool like Syncthing at that folder to keep devices in sync; when the file
-changes on disk while the app is backgrounded, it reloads on resume
+The same web app also runs as an Android app (Capacitor 6), and in desktop
+Chrome/Edge it can use the same file-backed storage via the File System
+Access API. In both, persistence switches from IndexedDB to a **save folder
+you choose**: on first launch you're asked to pick a folder (SAF picker on
+Android, directory picker on the web), and the collection lives there as
+`oss-anki.json` — read at startup and rewritten (debounced, atomic
+tmp+rename) as you study and edit. **Media is NOT in the JSON**: images and
+audio are individual files in an `oss-anki.media/` subfolder, written when
+added and fetched lazily when displayed, so reviewing a card only rewrites
+the small text JSON even for huge media libraries. (Save files from before
+the split are migrated on first load.)
+
+Point a sync tool like Syncthing at that folder to keep devices in sync;
+while the app is open a 3-second poll picks up external changes
 (last-writer-wins, no merge). The header's **Folder** button shows/changes
-the folder, and Export/Backup write timestamped files into it.
+the folder; **Backup** writes a fixed-name `oss-anki-backup.json` into it
+(also refreshed automatically every 15 min and on backgrounding) and greys
+out when it's already up to date; **History** shows recent saves/loads. On
+the web, the folder grant may need one click per browser session (none when
+installed as a PWA with a persistent grant); browsers without the File
+System Access API (Firefox/Safari) keep using IndexedDB.
 
 ```bash
 npm install
@@ -91,13 +103,14 @@ npm run build:android   # assembles dist/ (scripts/build-capacitor.sh) + npx cap
 ```
 
 How it fits together: `web/storage.js` picks the backend at runtime —
-IndexedDB (`src/storage.js`) in the browser, or `web/storage-file.js` (same
-function surface over one JSON file) when `Capacitor.isNativePlatform()`.
-`web/native-bridge.js` talks to the `SaveFolder` plugin
-(`android/app/src/main/java/dev/phylliida/anki/SaveFolderPlugin.java`), which
-owns the folder picker and file IO. The save file is the standard
-`src/backup.js` format plus a `history` field, so Backup/Restore stays
-compatible across platforms.
+IndexedDB (`src/storage.js`) in plain browsers, or `web/storage-file.js`
+(same function surface over the save folder) on Android or when
+`showOpenFilePicker` exists. The bridge behind it is
+`web/native-bridge.js` (talking to the `SaveFolder` plugin at
+`android/app/src/main/java/dev/phylliida/anki/SaveFolderPlugin.java`) on
+Android, or `web/fs-access-bridge.js` (File System Access API) on the web.
+The save file is the standard `src/backup.js` format (minus media) plus a
+`history` field, so Backup/Restore stays compatible across platforms.
 
 ## Usage
 
