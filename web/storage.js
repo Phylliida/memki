@@ -1,21 +1,27 @@
-// Storage backend selector: the browser app keeps using IndexedDB
-// (src/storage.js); inside the Capacitor Android app the whole collection
-// lives in a user-chosen JSON save file instead (web/storage-file.js), so it
-// can be synced externally (Syncthing etc.). Both backends expose the same
-// function surface — every call takes the db handle first — so callers
-// (web/app.js) don't branch on platform anywhere else.
+// Storage backend selector: inside the Capacitor Android app the whole
+// collection lives in a user-chosen JSON save file (web/storage-file.js),
+// and desktop Chrome/Edge can do the same via the File System Access API
+// (web/fs-access-bridge.js) — so the file can be synced externally
+// (Syncthing etc.). Other browsers keep using IndexedDB (src/storage.js).
+// All backends expose the same function surface — every call takes the db
+// handle first — so callers (web/app.js) don't branch on platform anywhere
+// else.
 
 import * as idbStore from "../src/storage.js";
 import * as fileStore from "./storage-file.js";
 
 export const isNative = !!globalThis.Capacitor?.isNativePlatform?.();
-const impl = isNative ? fileStore : idbStore;
+// True when the whole collection lives in one user-chosen JSON file:
+// Android (SAF folder) or desktop Chrome/Edge (File System Access API).
+export const hasSaveFile = isNative || !!globalThis.showOpenFilePicker;
+const impl = hasSaveFile ? fileStore : idbStore;
 
 export async function openCollectionDB(...args) {
-  if (isNative) {
-    // The bridge needs the user's chosen save folder; native-bridge handles
-    // the first-run picker gate. Imported lazily so the browser never loads it.
-    const { getSaveFileBridge } = await import("./native-bridge.js");
+  if (hasSaveFile) {
+    // The bridge needs the user's chosen save file; the bridge modules
+    // handle the first-run picker gate. Imported lazily so IndexedDB-only
+    // browsers never load them.
+    const { getSaveFileBridge } = await import(isNative ? "./native-bridge.js" : "./fs-access-bridge.js");
     return fileStore.openCollectionDB(await getSaveFileBridge());
   }
   return idbStore.openCollectionDB(...args);
@@ -38,6 +44,6 @@ export const listNoteHistory = (...a) => impl.listNoteHistory(...a);
 export const deleteNoteHistory = (...a) => impl.deleteNoteHistory(...a);
 
 // File-backend extras: no-ops under IndexedDB (which writes through already).
-export const flushStore = isNative ? (...a) => fileStore.flushStore(...a) : async () => {};
-export const storeStamp = isNative ? (...a) => fileStore.storeStamp(...a) : () => 0;
-export const storeDirty = isNative ? (db) => !!db?.dirty : () => false;
+export const flushStore = hasSaveFile ? (...a) => fileStore.flushStore(...a) : async () => {};
+export const storeStamp = hasSaveFile ? (...a) => fileStore.storeStamp(...a) : () => 0;
+export const storeDirty = hasSaveFile ? (db) => !!db?.dirty : () => false;

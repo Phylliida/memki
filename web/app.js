@@ -20,7 +20,7 @@ import {
   openCollectionDB, loadCollection, saveCollection,
   putCard, putNote, putRevlog, putMeta, saveMedia, loadMedia, clearAll, deleteCards, deleteNoteAndCards, deleteRevlog,
   pushNoteHistory, listNoteHistory, deleteNoteHistory,
-  isNative, flushStore, storeStamp, storeDirty,
+  isNative, hasSaveFile, flushStore, storeStamp, storeDirty,
 } from "./storage.js";
 
 const SQL_CDN = new URL("../vendor/sqljs/", import.meta.url).href;
@@ -2822,11 +2822,12 @@ async function exportDeck(deck) {
 // --- native (Capacitor Android): save folder + file-change watching ---
 
 async function updateFolderButton() {
-  const { folderLabel } = await import("./native-bridge.js");
+  const { folderLabel } = await import(isNative ? "./native-bridge.js" : "./fs-access-bridge.js");
   const label = await folderLabel();
+  const kind = isNative ? "Folder" : "File";
   const btn = document.getElementById("btn-folder");
-  btn.textContent = label ? `Folder: ${label}` : "Folder";
-  btn.title = label ? `Saving oss-anki.json in ${label}` : "Choose save folder";
+  btn.textContent = label ? `${kind}: ${label}` : kind;
+  btn.title = label ? `Saving to ${label}` : `Choose save ${kind.toLowerCase()}`;
 }
 
 /** Reload the collection from the save file (external change / folder switch). */
@@ -2843,17 +2844,17 @@ async function reloadFromSaveFile(statusMsg) {
   renderDecks();
 }
 
-/** Pick a new save folder, then load whatever oss-anki.json lives there. */
+/** Pick a new save folder/file, then load whatever oss-anki.json lives there. */
 async function onChangeFolder() {
   try {
     await flushStore(state.db); // don't lose pending edits to the old file
-    const { pickSaveFolder, folderLabel } = await import("./native-bridge.js");
+    const { pickSaveFolder, folderLabel } = await import(isNative ? "./native-bridge.js" : "./fs-access-bridge.js");
     if (!(await pickSaveFolder())) return;
-    await reloadFromSaveFile(`Save folder: ${await folderLabel()}.`);
+    await reloadFromSaveFile(`Save location: ${await folderLabel()}.`);
     await flushStore(state.db); // a fresh default collection lands immediately
     updateFolderButton();
   } catch (e) {
-    setStatus(`Folder switch failed: ${e.message}`);
+    setStatus(`Save-location switch failed: ${e.message}`);
     console.error(e);
   }
 }
@@ -2863,7 +2864,7 @@ async function onNativeResume() {
   if (!state.db) return;
   try {
     await flushStore(state.db); // last-writer-wins: pending edits land first
-    const { statSaveFile } = await import("./native-bridge.js");
+    const { statSaveFile } = await import(isNative ? "./native-bridge.js" : "./fs-access-bridge.js");
     const st = await statSaveFile();
     if (st.exists && st.modified !== storeStamp(state.db)) {
       await reloadFromSaveFile("Reloaded — save file changed on disk.");
@@ -2937,16 +2938,18 @@ async function wireNative() {
   document.getElementById("btn-folder").hidden = false;
   document.getElementById("btn-history").hidden = false;
   updateFolderButton();
-  const { watchAppState } = await import("./native-bridge.js");
-  watchAppState({
-    onPause: () => {
-      flushStore(state.db)?.catch?.((e) => console.error("pause flush failed:", e));
-      autoBackup();
-    },
-    onResume: () => { onNativeResume(); updateBackupButton(); },
-  });
+  if (isNative) {
+    const { watchAppState } = await import("./native-bridge.js");
+    watchAppState({
+      onPause: () => {
+        flushStore(state.db)?.catch?.((e) => console.error("pause flush failed:", e));
+        autoBackup();
+      },
+      onResume: () => { onNativeResume(); updateBackupButton(); },
+    });
+    setInterval(autoBackup, AUTO_BACKUP_INTERVAL_MS);
+  }
   window.addEventListener("beforeunload", () => { flushStore(state.db); });
-  setInterval(autoBackup, AUTO_BACKUP_INTERVAL_MS);
   updateBackupButton();
   // Poor-man's file watcher: pick up external edits (Syncthing delivering
   // changes made on another device, etc.) so the app stays up to date while
@@ -3017,7 +3020,7 @@ async function init() {
     await saveCollection(state.db, state.col);
   }
   state.media = await loadMedia(state.db);
-  if (isNative) recordFileEvent("loaded");
+  if (hasSaveFile) recordFileEvent("loaded");
   sanitizeCurModel(state.col); // a stale curModel (e.g. from an import) would break Add Card
   // One-time migration: convert any legacy HTML fields to markdown.
   const { migrateCollectionToMarkdown } = await import("../src/html-to-md.js");
@@ -3034,7 +3037,7 @@ async function init() {
   }
   wireHeader();
   wireKeyboard();
-  if (isNative) await wireNative();
+  if (hasSaveFile) await wireNative();
   renderDecks();
 }
 

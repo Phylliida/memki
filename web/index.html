@@ -43,14 +43,15 @@
       <button id="btn-import" title="Import an .apkg/.colpkg deck, a .csv/.tsv spreadsheet, or restore a .json backup">Import</button>
       <button id="btn-export">Export .apkg</button>
       <button id="btn-backup" title="Download a full JSON backup (collection + media)">Backup</button>
-      <button id="btn-history" title="Save/load history (Android app)" hidden>History</button>
-      <button id="btn-folder" title="Save folder (Android app)" hidden>Folder</button>
+      <button id="btn-history" title="Save/load history" hidden>History</button>
+      <button id="btn-folder" title="Choose where to save" hidden>Folder</button>
       <input id="file-import" type="file" accept=".apkg,.colpkg,.json,.csv,.tsv,.txt" hidden />
     </div>
   </header>
 
-  <!-- First-run gate on the Android app: block until a save folder is chosen.
-       Driven by web/native-bridge.js (ensureSaveFolder). -->
+  <!-- First-run gate when file-backed: block until a save folder/file is
+       chosen. Driven by web/native-bridge.js (Android) or
+       web/fs-access-bridge.js (desktop Chrome/Edge). -->
   <div id="folder-gate" class="folder-gate" hidden>
     <div class="folder-gate-card">
       <h2>Choose a save folder</h2>
@@ -60,6 +61,7 @@
         your sync tool (Syncthing, …) watches to keep devices in sync.
       </p>
       <button id="btn-pick-folder">Choose folder</button>
+      <button id="btn-new-file" hidden>Create new file</button>
       <p id="folder-gate-msg" class="muted"></p>
     </div>
   </div>
