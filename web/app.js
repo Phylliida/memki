@@ -2671,6 +2671,7 @@ async function loadSql() {
 }
 
 async function doBackup() {
+  await flushStore(state.db); // land pending edits first, so the recorded stamp covers them
   const { collectionToBackup } = await import("../src/backup.js");
   const data = JSON.stringify(collectionToBackup(state.col, state.media));
   if (isNative) {
@@ -2679,6 +2680,7 @@ async function doBackup() {
     const { writeToFolder, textToBase64, folderLabel, BACKUP_FILE_NAME } = await import("./native-bridge.js");
     await writeToFolder(BACKUP_FILE_NAME, textToBase64(data));
     setStatus(`Backup written to ${BACKUP_FILE_NAME} in ${await folderLabel()}.`);
+    recordBackupStamp();
     updateBackupButton();
     return;
   }
@@ -2689,6 +2691,8 @@ async function doBackup() {
   a.click();
   URL.revokeObjectURL(a.href);
   setStatus("Backup downloaded.");
+  recordBackupStamp();
+  updateBackupButton();
 }
 
 // --- automatic backup (native app only) ---
@@ -2704,11 +2708,13 @@ async function autoBackup() {
   if (state.col.notes.size === 0) return;
   autoBackupRunning = true;
   try {
+    await flushStore(state.db); // land pending edits so the stamp covers them
     const { collectionToBackup } = await import("../src/backup.js");
     const { writeToFolder, textToBase64, BACKUP_FILE_NAME } = await import("./native-bridge.js");
     const data = JSON.stringify(collectionToBackup(state.col, state.media));
     await writeToFolder(BACKUP_FILE_NAME, textToBase64(data));
     console.log(`auto-backup wrote ${BACKUP_FILE_NAME}`);
+    recordBackupStamp();
     updateBackupButton();
   } catch (e) {
     console.error("auto-backup failed:", e);
@@ -2874,23 +2880,26 @@ async function onNativeResume() {
   }
 }
 
+// The save-file stamp (mtime) the last successful backup covered, persisted
+// so Backup's greyed-out state survives app restarts. Absent/0 = no backup
+// yet → button enabled (fails open).
+const BACKUP_STAMP_KEY = "backupStamp";
+
+function recordBackupStamp() {
+  try { localStorage.setItem(BACKUP_STAMP_KEY, String(storeStamp(state.db))); } catch { /* quota */ }
+}
+
 /**
- * Grey out Backup once oss-anki-backup.json already covers the current
- * save file: enabled when there are unflushed edits, when the save file
- * is newer than the backup, or when no backup exists yet. Native only —
- * the browser Backup (a download) is always enabled.
+ * Grey out Backup once a backup already covers the current state: the
+ * persisted backup stamp matches the save file's current stamp and there
+ * are no unflushed edits. Any content change — a local edit, or a synced-in
+ * external edit bumping the file mtime — re-enables it.
  */
-async function updateBackupButton() {
+function updateBackupButton() {
   const btn = document.getElementById("btn-backup");
-  if (!isNative || !state.db) { btn.disabled = false; return; }
-  try {
-    const { statSaveFile, statInFolder, BACKUP_FILE_NAME } = await import("./native-bridge.js");
-    const [save, bak] = await Promise.all([statSaveFile(), statInFolder(BACKUP_FILE_NAME)]);
-    btn.disabled = !storeDirty(state.db)
-      && save.exists && bak.exists && bak.modified >= save.modified;
-  } catch {
-    btn.disabled = false; // can't tell → leave it usable
-  }
+  const stamp = Number(localStorage.getItem(BACKUP_STAMP_KEY));
+  btn.disabled = !!state.db && !storeDirty(state.db)
+    && stamp > 0 && stamp === storeStamp(state.db);
 }
 
 // --- save/load history (native) ---
