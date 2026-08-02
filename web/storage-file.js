@@ -73,12 +73,14 @@ export async function openCollectionDB(bridge) {
     timer: null,
     writing: null,      // in-flight flush promise
     lastStamp: 0,       // file mtime we last read or wrote (external-change detection)
+    lastSerialized: null, // last file content — flushes with no real change are skipped
   };
 }
 
 function markDirty(db) {
   db.epoch += 1;
   db.dirty = true;
+  db.onDirty?.(); // app.js: edits instantly re-enable the Backup button
   if (db.timer) clearTimeout(db.timer);
   db.timer = setTimeout(() => {
     db.timer = null;
@@ -105,12 +107,22 @@ export async function flushStore(db) {
   // will flush again).
   const epoch = db.epoch;
   const text = serialize(db);
+  if (text === db.lastSerialized) {
+    // Nothing actually changed (e.g. init's unconditional putMeta) — don't
+    // rewrite the file: the mtime is the external-change signal, and
+    // bumping it would fool the watcher AND the backup-stamp check.
+    if (db.epoch === epoch) db.dirty = false;
+    db.onFlushed?.();
+    return;
+  }
   db.writing = (async () => {
     try {
       const { modified } = await db.bridge.write(textToBase64(text));
       db.lastStamp = modified;
+      db.lastSerialized = text;
       db.onFileEvent?.("saved", modified); // app.js save/load history log
       if (db.epoch === epoch) db.dirty = false;
+      db.onFlushed?.();
     } finally {
       db.writing = null;
     }
@@ -141,6 +153,7 @@ export async function loadCollection(db, { force = false } = {}) {
   db.history = new Map(
     Object.entries(obj.history ?? {}).map(([nid, arr]) => [Number(nid), arr]),
   );
+  db.lastSerialized = base64ToText(b64); // lets flushStore skip no-change rewrites
   // One-time migration: save files from before the media split still embed
   // base64 media — move it out to sibling files and rewrite the JSON
   // without it (via the dirty flag).

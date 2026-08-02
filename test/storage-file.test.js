@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  openCollectionDB, saveCollection, loadCollection, putCard, putNote, putRevlog,
+  openCollectionDB, saveCollection, loadCollection, putCard, putNote, putRevlog, putMeta,
   saveMedia, loadMedia, loadMediaNames, clearAll, pushNoteHistory, listNoteHistory,
   deleteNoteHistory, deleteNoteAndCards, flushStore, storeStamp,
 } from "../web/storage-file.js";
@@ -146,8 +146,24 @@ test("note edit history: keep last 20, newest first, survives reload", async () 
   assert.deepEqual(await listNoteHistory(db2, 7), []);
 });
 
-test("clearAll + saveCollection replaces the collection", async () => {
+test("flush with unchanged content does not rewrite the file", async () => {
   const bridge = mockBridge();
+  const db = await openCollectionDB(bridge);
+  await saveCollection(db, sampleCollection());
+  await flushStore(db);
+  const stamp = storeStamp(db);
+  assert.ok(stamp > 0);
+
+  // Reopen (app refresh), then a no-op putMeta exactly like init()'s —
+  // content is identical, so the file (and its mtime) must not move.
+  const db2 = await openCollectionDB(bridge);
+  await loadCollection(db2);
+  await putMeta(db2);
+  await flushStore(db2);
+  assert.equal(storeStamp(db2), stamp);
+});
+
+test("clearAll + saveCollection replaces the collection", async () => {  const bridge = mockBridge();
   const db = await openCollectionDB(bridge);
   await saveCollection(db, sampleCollection());
   await saveMedia(db, new Map([["a.png", new Uint8Array([9])]]));

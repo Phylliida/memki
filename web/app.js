@@ -2775,6 +2775,17 @@ async function doBackup() {
 const AUTO_BACKUP_INTERVAL_MS = 15 * 60 * 1000;
 let autoBackupRunning = false;
 
+// Keep the backup trailing the save file: a few seconds after edits stop
+// auto-saving, snapshot to the backup file so the Backup button settles
+// back to grey on its own. Cheap now that backups are text-only.
+const AUTO_BACKUP_AFTER_SAVE_MS = 4 * 1000;
+let autoBackupTimer = null;
+function scheduleAutoBackup() {
+  if (!hasSaveFile) return;
+  clearTimeout(autoBackupTimer);
+  autoBackupTimer = setTimeout(() => autoBackup(), AUTO_BACKUP_AFTER_SAVE_MS);
+}
+
 async function autoBackup() {
   if (!hasSaveFile || !state.db || !state.col || autoBackupRunning) return;
   if (state.col.notes.size === 0) return;
@@ -3113,7 +3124,12 @@ function wireKeyboard() {
 
 async function init() {
   state.db = await openCollectionDB();
-  state.db.onFileEvent = (kind, t) => recordFileEvent(kind, t); // native file store only
+  state.db.onFileEvent = (kind, t) => {
+    recordFileEvent(kind, t);
+    if (kind === "saved") scheduleAutoBackup();
+  };
+  state.db.onDirty = () => updateBackupButton();   // any edit → Backup no longer up to date
+  state.db.onFlushed = () => updateBackupButton(); // auto-save settled → re-evaluate
   state.col = await loadCollection(state.db);
   if (!state.col) {
     state.col = Collection.createDefault();
