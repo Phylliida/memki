@@ -5,7 +5,7 @@ File System Access API (Firefox, Safari).
 Run it next to your save folder and paste the printed connect URL into the
 web app (it asks on first launch):
 
-    python3 web/file-server.py /path/to/save-folder
+    python3 web/file-server.py [/path/to/save-folder]   # default: ./save
 
 It also serves the app itself at http://127.0.0.1:8787/web/ — the connect
 URL it prints opens that page with the token already filled in.
@@ -42,7 +42,8 @@ PORT = 8787
 SAVE = "oss-anki.json"
 MEDIA = "oss-anki.media"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ROOT = os.path.join(REPO, "save")
+# Save folder: CLI arg if given, else ./save inside the repo.
+ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.join(REPO, "save")
 Path(ROOT).mkdir(parents=True, exist_ok=True)
 # static_url_path="" serves the repo root (/web/, /src/, /vendor/...) so the
 # app works fully from this server; the API lives under /api/.
