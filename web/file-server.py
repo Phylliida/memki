@@ -149,5 +149,5 @@ def write_media(name):
 
 if __name__ == "__main__":
     print(f"oss-anki save folder: {ROOT}")
-    print(f"connect URL: http://127.0.0.1:{PORT}/web/index.html?token={TOKEN}")
+    print(f"connect URL: http://127.0.0.1:{PORT}/web/?token={TOKEN}")
     app.run(host="127.0.0.1", port=PORT)

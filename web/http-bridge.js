@@ -16,7 +16,23 @@ let server = null;           // { url, token, label } | null
 
 function store(s) {
   server = s;
-  try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch { /* quota */ }
+  try {
+    if (s) localStorage.setItem(LS_KEY, JSON.stringify(s));
+    else localStorage.removeItem(LS_KEY);
+  } catch { /* quota */ }
+}
+
+/**
+ * Try candidate credentials; keep them ONLY if the server accepts them, so
+ * a bad paste can't clobber working credentials (a wrong token gets a 403
+ * from the server — it does enforce).
+ */
+async function tryConnect(candidate) {
+  const prev = loadStored();
+  store(candidate);
+  if (await probe()) return true;
+  store(prev);
+  return false;
 }
 
 // Adopt ?token= from the page URL (the connect URL file-server.py prints
@@ -79,6 +95,38 @@ export async function probe() {
   }
 }
 
+/** Are companion-server credentials stored (paired at some point)? */
+export function hasStoredCreds() {
+  return loadStored() != null;
+}
+
+/**
+ * Is this page being served BY file-server.py? The server answers
+ * token-less /api/stat with 403; any other origin 404s or errors.
+ */
+export async function originIsServer() {
+  try {
+    const res = await fetch(`${location.origin}/api/stat`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(1500),
+    });
+    return res.status === 403;
+  } catch {
+    return false;
+  }
+}
+
+/** "ok" | "auth" (server up, token rejected) | "down" (unreachable). */
+export async function connectionHealth() {
+  if (!loadStored()) return "down";
+  try {
+    await api("/api/stat", {}, 1500);
+    return "ok";
+  } catch (e) {
+    return /HTTP 403/.test(e?.message) ? "auth" : "down";
+  }
+}
+
 /** Human-readable label for the save folder ("" when unknown). */
 export async function folderLabel() {
   const s = loadStored();
@@ -120,9 +168,9 @@ export async function ensureSaveFolder() {
   const btn = document.getElementById("btn-pick-folder");
   gate.querySelector("h2").textContent = "Connect to a save folder";
   gate.querySelector("p").textContent =
-    "This browser can't write local files directly. Run " +
-    "`python3 web/file-server.py /path/to/save-folder` on this computer " +
-    "and paste the connect URL it prints.";
+    "Run `python3 web/file-server.py` on this computer and paste the " +
+    "connect URL it prints (it contains a token that changes on every " +
+    "server start). Your cards are NOT being saved until you connect.";
   const input = el("input", { type: "text", placeholder: "http://127.0.0.1:8787/web/?token=…" });
   btn.before(input);
   btn.textContent = "Connect";
@@ -130,10 +178,15 @@ export async function ensureSaveFolder() {
   try {
     for (;;) {
       await new Promise((resolve) => btn.addEventListener("click", resolve, { once: true }));
-      try {
-        store(parseConnectUrl(input.value));
+      // Empty box = retry the stored credentials (transient server dip).
+      if (!input.value.trim()) {
         if (await probe()) return;
-        msg.textContent = "Can't reach that server — is file-server.py running?";
+        msg.textContent = "Still can't reach the server with the stored token — paste the new connect URL.";
+        continue;
+      }
+      try {
+        if (await tryConnect(parseConnectUrl(input.value))) return;
+        msg.textContent = "Can't reach that server, or the token is wrong.";
       } catch (e) {
         msg.textContent = `Bad connect URL (${e?.message ?? e}).`;
       }
@@ -158,8 +211,7 @@ export async function pickSaveFolder() {
     const text = prompt("Connect URL printed by file-server.py:", "http://127.0.0.1:8787/web/?token=");
     if (!text) return false;
     try {
-      store(parseConnectUrl(text));
-      return await probe();
+      return await tryConnect(parseConnectUrl(text));
     } catch {
       return false;
     }

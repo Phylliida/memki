@@ -26,10 +26,11 @@ body {
 
 /* No separate panel color for the header — it blends into the page. */
 header {
-  padding: 8px 24px;
+  padding: 8px 0;
   background: var(--bg);
 }
-/* Header content rides the same centered column as main. */
+/* Header content rides the same centered column as main: max-width 1200px,
+   auto margins, 24px side padding INSIDE the box (matching main exactly). */
 .header-inner {
   display: flex;
   align-items: center;
@@ -38,13 +39,14 @@ header {
   max-width: 1200px;
   width: 100%;
   margin: 0 auto;
+  padding: 0 24px;
+  box-sizing: border-box;
 }
-/* The actions bar collapses behind the ☰ menu button; when open it wraps
-   to its own full-width row under the menu button instead of crowding it. */
 .menu-btn { padding: 6px 10px; font-size: 16px; line-height: 1; }
-.actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+/* Buttons flow inline next to ☰ when the menu is open (left-aligned),
+   wrapping below when the row runs out of room. */
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .actions[hidden] { display: none; }
-header.menu-open .actions { flex-basis: 100%; margin-left: 0; }
 .grow { flex: 1; }
 .muted { color: var(--muted); }
 
@@ -282,8 +284,6 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 }
 .modal-panel h3 { margin: 0; font-size: 16px; }
 .modal-panel .row { display: flex; gap: 8px; justify-content: flex-end; }
-/* Deck picker in the export modal: full-width, left-aligned, stacked. */
-.deck-pick { text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Save-folder gate (Android first run): blocking overlay, mirrors the modal look. */
 .folder-gate {

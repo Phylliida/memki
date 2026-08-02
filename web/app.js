@@ -2135,7 +2135,12 @@ function renderDeckOptions(deckId) {
   };
   show(
     el("div", { class: "crumbs", onclick: renderDecks }, "← Decks"),
-    el("h2", {}, `Options — ${deck.name}`),
+    el("div", { class: "add-head" },
+      el("h2", {}, `Options — ${deck.name}`),
+      el("div", { class: "add-actions" },
+        el("button", { onclick: () => exportDeck(deck) }, "Export .apkg"),
+      ),
+    ),
     el("div", { class: "form" },
       consequences,
       el("h3", {}, "New cards"),
@@ -2849,18 +2854,7 @@ async function doImport(file) {
   }
 }
 
-// --- export (.apkg, one deck at a time) ---
-
-function doExport() {
-  const decks = Object.values(state.col.decks).sort((a, b) => a.name.localeCompare(b.name));
-  const { close } = openModal([
-    el("h3", {}, "Export which deck?"),
-    ...decks.map((d) => el("button", {
-      class: "deck-pick",
-      onclick: () => { close(); exportDeck(d); },
-    }, d.name)),
-  ]);
-}
+// --- export (.apkg, one deck at a time — from the deck's options view) ---
 
 async function exportDeck(deck) {
   try {
@@ -2969,12 +2963,34 @@ function recordBackupStamp() {
  * persisted backup stamp matches the save file's current stamp and there
  * are no unflushed edits. Any content change — a local edit, or a synced-in
  * external edit bumping the file mtime — re-enables it.
- */
-function updateBackupButton() {
+ */function updateBackupButton() {
   const btn = document.getElementById("btn-backup");
   const stamp = Number(localStorage.getItem(BACKUP_STAMP_KEY));
   btn.disabled = !!state.db && !storeDirty(state.db)
     && stamp > 0 && stamp === storeStamp(state.db);
+}
+
+/**
+ * Companion-server mode only: if the server goes down or restarts (its
+ * token changes on every start), re-open the connect gate instead of
+ * silently not-saving. Blocks until reconnected, then reloads from the file.
+ */
+let serverGateOpen = false;
+async function checkServerConnection() {
+  if (bridgePath !== "./http-bridge.js" || serverGateOpen || !state.db) return;
+  const { connectionHealth } = await import("./http-bridge.js");
+  if ((await connectionHealth()) === "ok") return;
+  serverGateOpen = true;
+  try {
+    const { ensureSaveFolder } = await import(bridgePath);
+    await ensureSaveFolder(); // blocks until reconnected
+    await reloadFromSaveFile("Reconnected to file server.");
+    updateFolderButton();
+  } catch (e) {
+    console.error("server reconnect failed:", e);
+  } finally {
+    serverGateOpen = false;
+  }
 }
 
 // --- save/load history (native) ---
@@ -3037,10 +3053,11 @@ async function wireNative() {
   updateBackupButton();
   // Poor-man's file watcher: pick up external edits (Syncthing delivering
   // changes made on another device, etc.) so the app stays up to date while
-  // it sits open, and keep the Backup button's greyed-out state in step.
+  // it sits open, keep the Backup button's greyed-out state in step, and
+  // (companion-server mode) re-open the connect gate if the server drops.
   // Same last-writer-wins rule as onNativeResume — pending local edits
   // flush first.
-  setInterval(() => { onNativeResume(); updateBackupButton(); }, 3 * 1000);
+  setInterval(() => { onNativeResume(); updateBackupButton(); checkServerConnection(); }, 3 * 1000);
 }
 
 function wireHeader() {
@@ -3068,7 +3085,6 @@ function wireHeader() {
     if (fileInput.files[0]) doImport(fileInput.files[0]);
     fileInput.value = "";
   });
-  document.getElementById("btn-export").addEventListener("click", doExport);
   document.getElementById("btn-backup").addEventListener("click", doBackup);
   document.getElementById("btn-history").addEventListener("click", showHistory);
   document.getElementById("btn-folder").addEventListener("click", onChangeFolder);

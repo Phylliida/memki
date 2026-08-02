@@ -1,9 +1,12 @@
 // Storage backend selector, probed in this order:
 //   1. Android app (Capacitor)      → file-backed, SAF folder (native-bridge)
-//   2. File System Access API       → file-backed, picked folder (fs-access-bridge)
+//   2. localhost companion server   → file-backed (http-bridge) whenever it's
+//      (web/file-server.py)            clearly in play: page served BY it, or
+//                                       paired credentials stored. Missing or
+//                                       stale token = loud connect gate, NOT
+//                                       a silent IndexedDB fallback.
+//   3. File System Access API       → file-backed, picked folder (fs-access-bridge)
 //      (desktop Chrome/Edge)
-//   3. localhost companion server   → file-backed (http-bridge; Firefox/Safari —
-//      (web/file-server.py)           run `python3 web/file-server.py <folder>`)
 //   4. fallback                     → IndexedDB (src/storage.js)
 // File-backed means the whole collection lives in a user-chosen folder as
 // oss-anki.json (+ oss-anki.media/), syncable externally (Syncthing etc.).
@@ -22,21 +25,25 @@ export let bridgePath = isNative ? "./native-bridge.js" : "./fs-access-bridge.js
 let impl = hasSaveFile ? fileStore : idbStore;
 
 export async function openCollectionDB(...args) {
+  // The companion server wins whenever it's clearly in play: this page is
+  // served BY it, or credentials are already paired. Crucially, if the
+  // token is missing/stale we do NOT silently fall back to IndexedDB —
+  // getSaveFileBridge's gate demands the connect URL (loud failure).
+  if (!isNative) {
+    const http = await import("./http-bridge.js");
+    if ((await http.probe()) || (await http.originIsServer()) || http.hasStoredCreds()) {
+      hasSaveFile = true;
+      bridgePath = "./http-bridge.js";
+      impl = fileStore;
+      return fileStore.openCollectionDB(await http.getSaveFileBridge());
+    }
+  }
   if (hasSaveFile) {
-    // The bridge needs the user's chosen save folder/server; the bridge
-    // modules handle the first-run picker/connect gate. Imported lazily so
-    // IndexedDB-only browsers never load them.
+    // The bridge needs the user's chosen save folder; the bridge modules
+    // handle the first-run picker gate. Imported lazily so IndexedDB-only
+    // browsers never load them.
     const { getSaveFileBridge } = await import(bridgePath);
     return fileStore.openCollectionDB(await getSaveFileBridge());
-  }
-  // No Capacitor, no File System Access API (Firefox/Safari): try the
-  // localhost companion server before falling back to IndexedDB.
-  const http = await import("./http-bridge.js");
-  if (await http.probe()) {
-    hasSaveFile = true;
-    bridgePath = "./http-bridge.js";
-    impl = fileStore;
-    return fileStore.openCollectionDB(await http.getSaveFileBridge());
   }
   return idbStore.openCollectionDB(...args);
 }

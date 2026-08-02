@@ -128,8 +128,11 @@ python3 web/file-server.py /path/to/save-folder
 
 It binds to loopback only, requires the per-start token in an `X-Auth`
 header for all `/api/*` calls (so random websites can't talk to it), and
-writes atomically via tmp+rename. Detection order: native app → File
-System Access API → companion server → IndexedDB fallback.
+writes atomically via tmp+rename. Detection order: native app → companion
+server (when paired, or the page is served by it) → File System Access API
+→ IndexedDB fallback. If the token is missing or stale (server restarted),
+the app blocks with a connect gate rather than silently saving to browser
+storage.
 
 ## Usage
 
