@@ -67,6 +67,8 @@ pkgs.mkShell {
     # ── Web app / test toolchain ───────────────────────────────
     nodejs_20               # tests (node --test) + Capacitor CLI
     python3                 # npm run serve → python3 web/serve.py
+    python3Packages.flask   # web/file-server.py — localhost save-folder
+                            # companion for Firefox/Safari
 
     # ── Android build toolchain ────────────────────────────────
     jdk17

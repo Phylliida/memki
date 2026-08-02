@@ -20,7 +20,7 @@ import {
   openCollectionDB, loadCollection, saveCollection,
   putCard, putNote, putRevlog, putMeta, saveMedia, loadMedia, loadMediaNames, clearAll, deleteCards, deleteNoteAndCards, deleteRevlog,
   pushNoteHistory, listNoteHistory, deleteNoteHistory,
-  isNative, hasSaveFile, flushStore, storeStamp, storeDirty,
+  isNative, hasSaveFile, bridgePath, flushStore, storeStamp, storeDirty,
 } from "./storage.js";
 
 const SQL_CDN = new URL("../vendor/sqljs/", import.meta.url).href;
@@ -2739,16 +2739,18 @@ async function doBackup() {
   // (synced along by Syncthing & co.), so the backup JSON is text-only.
   // IndexedDB browsers embed media in the backup as before.
   const data = JSON.stringify(collectionToBackup(state.col, hasSaveFile ? undefined : state.media));
-  if (isNative) {
-    // No anchor-download in the Capacitor WebView — write into the save folder.
-    // Same fixed name as the automatic backup: always overwritten.
-    const { writeToFolder, textToBase64, folderLabel, BACKUP_FILE_NAME } = await import("./native-bridge.js");
+  if (hasSaveFile) {
+    // Write into the save folder — same fixed name as the automatic
+    // backup: always overwritten.
+    const { writeToFolder, textToBase64, folderLabel, BACKUP_FILE_NAME } =
+      await import(bridgePath);
     await writeToFolder(BACKUP_FILE_NAME, textToBase64(data));
     setStatus(`Backup written to ${BACKUP_FILE_NAME} in ${await folderLabel()}.`);
     recordBackupStamp();
     updateBackupButton();
     return;
   }
+  // IndexedDB browsers: no folder to write to — download instead.
   const name = `oss-anki-backup-${new Date().toISOString().slice(0, 10)}.json`;
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([data], { type: "application/json" }));
@@ -2769,13 +2771,14 @@ const AUTO_BACKUP_INTERVAL_MS = 15 * 60 * 1000;
 let autoBackupRunning = false;
 
 async function autoBackup() {
-  if (!isNative || !state.db || !state.col || autoBackupRunning) return;
+  if (!hasSaveFile || !state.db || !state.col || autoBackupRunning) return;
   if (state.col.notes.size === 0) return;
   autoBackupRunning = true;
   try {
     await flushStore(state.db); // land pending edits so the stamp covers them
     const { collectionToBackup } = await import("../src/backup.js");
-    const { writeToFolder, textToBase64, BACKUP_FILE_NAME } = await import("./native-bridge.js");
+    const { writeToFolder, textToBase64, BACKUP_FILE_NAME } =
+      await import(bridgePath);
     // Text-only: media lives as sibling files in the same synced folder.
     const data = JSON.stringify(collectionToBackup(state.col));
     await writeToFolder(BACKUP_FILE_NAME, textToBase64(data));
@@ -2901,12 +2904,11 @@ async function exportDeck(deck) {
 // --- native (Capacitor Android): save folder + file-change watching ---
 
 async function updateFolderButton() {
-  const { folderLabel } = await import(isNative ? "./native-bridge.js" : "./fs-access-bridge.js");
+  const { folderLabel } = await import(bridgePath);
   const label = await folderLabel();
-  const kind = isNative ? "Folder" : "File";
   const btn = document.getElementById("btn-folder");
-  btn.textContent = label ? `${kind}: ${label}` : kind;
-  btn.title = label ? `Saving to ${label}` : `Choose save ${kind.toLowerCase()}`;
+  btn.textContent = label ? `Folder: ${label}` : "Folder";
+  btn.title = label ? `Saving oss-anki.json in ${label}` : "Choose save folder";
 }
 
 /** Reload the collection from the save file (external change / folder switch). */
@@ -2927,7 +2929,7 @@ async function reloadFromSaveFile(statusMsg) {
 async function onChangeFolder() {
   try {
     await flushStore(state.db); // don't lose pending edits to the old file
-    const { pickSaveFolder, folderLabel } = await import(isNative ? "./native-bridge.js" : "./fs-access-bridge.js");
+    const { pickSaveFolder, folderLabel } = await import(bridgePath);
     if (!(await pickSaveFolder())) return;
     await reloadFromSaveFile(`Save location: ${await folderLabel()}.`);
     await flushStore(state.db); // a fresh default collection lands immediately
@@ -2943,7 +2945,7 @@ async function onNativeResume() {
   if (!state.db) return;
   try {
     await flushStore(state.db); // last-writer-wins: pending edits land first
-    const { statSaveFile } = await import(isNative ? "./native-bridge.js" : "./fs-access-bridge.js");
+    const { statSaveFile } = await import(bridgePath);
     const st = await statSaveFile();
     if (st.exists && st.modified !== storeStamp(state.db)) {
       await reloadFromSaveFile("Reloaded — save file changed on disk.");
@@ -3029,8 +3031,8 @@ async function wireNative() {
       },
       onResume: () => { onNativeResume(); updateBackupButton(); },
     });
-    setInterval(autoBackup, AUTO_BACKUP_INTERVAL_MS);
   }
+  setInterval(autoBackup, AUTO_BACKUP_INTERVAL_MS);
   window.addEventListener("beforeunload", () => { flushStore(state.db); });
   updateBackupButton();
   // Poor-man's file watcher: pick up external edits (Syncthing delivering

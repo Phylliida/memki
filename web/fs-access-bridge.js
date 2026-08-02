@@ -15,6 +15,10 @@
 // statSaveFile) so callers just dispatch on platform.
 
 export const SAVE_FILE_NAME = "oss-anki.json";
+// Automatic backup lives next to the save file under this fixed name —
+// always overwritten, never timestamped, so Syncthing & co. just see one
+// current copy.
+export const BACKUP_FILE_NAME = "oss-anki-backup.json";
 const MEDIA_DIR = "oss-anki.media";
 
 // The picked FileSystemDirectoryHandle, cached in memory + IndexedDB.
@@ -75,6 +79,16 @@ function base64ToBytes(b64) {
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return bytes;
+}
+
+export function textToBase64(text) {
+  return bytesToBase64(new TextEncoder().encode(text));
+}
+
+/** Write an arbitrary file (backup .json) into the save folder. */
+export async function writeToFolder(name, base64) {
+  const dir = await loadHandle();
+  await writeFileBase64(await dir.getFileHandle(name, { create: true }), base64);
 }
 
 async function fileBase64(fileHandle) {

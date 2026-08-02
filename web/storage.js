@@ -1,28 +1,42 @@
-// Storage backend selector: inside the Capacitor Android app the whole
-// collection lives in a user-chosen JSON save file (web/storage-file.js),
-// and desktop Chrome/Edge can do the same via the File System Access API
-// (web/fs-access-bridge.js) — so the file can be synced externally
-// (Syncthing etc.). Other browsers keep using IndexedDB (src/storage.js).
+// Storage backend selector, probed in this order:
+//   1. Android app (Capacitor)      → file-backed, SAF folder (native-bridge)
+//   2. File System Access API       → file-backed, picked folder (fs-access-bridge)
+//      (desktop Chrome/Edge)
+//   3. localhost companion server   → file-backed (http-bridge; Firefox/Safari —
+//      (web/file-server.py)           run `python3 web/file-server.py <folder>`)
+//   4. fallback                     → IndexedDB (src/storage.js)
+// File-backed means the whole collection lives in a user-chosen folder as
+// oss-anki.json (+ oss-anki.media/), syncable externally (Syncthing etc.).
 // All backends expose the same function surface — every call takes the db
-// handle first — so callers (web/app.js) don't branch on platform anywhere
-// else.
+// handle first — so callers (web/app.js) don't branch on platform; they
+// dispatch bridge imports via `bridgePath`.
 
 import * as idbStore from "../src/storage.js";
 import * as fileStore from "./storage-file.js";
 
 export const isNative = !!globalThis.Capacitor?.isNativePlatform?.();
-// True when the whole collection lives in one user-chosen JSON file:
-// Android (SAF folder) or desktop Chrome/Edge (File System Access API).
-export const hasSaveFile = isNative || !!globalThis.showOpenFilePicker;
-const impl = hasSaveFile ? fileStore : idbStore;
+// Live bindings: hasSaveFile/bridgePath/impl may be upgraded from IndexedDB
+// to the companion server when openCollectionDB's probe succeeds.
+export let hasSaveFile = isNative || !!globalThis.showOpenFilePicker;
+export let bridgePath = isNative ? "./native-bridge.js" : "./fs-access-bridge.js";
+let impl = hasSaveFile ? fileStore : idbStore;
 
 export async function openCollectionDB(...args) {
   if (hasSaveFile) {
-    // The bridge needs the user's chosen save file; the bridge modules
-    // handle the first-run picker gate. Imported lazily so IndexedDB-only
-    // browsers never load them.
-    const { getSaveFileBridge } = await import(isNative ? "./native-bridge.js" : "./fs-access-bridge.js");
+    // The bridge needs the user's chosen save folder/server; the bridge
+    // modules handle the first-run picker/connect gate. Imported lazily so
+    // IndexedDB-only browsers never load them.
+    const { getSaveFileBridge } = await import(bridgePath);
     return fileStore.openCollectionDB(await getSaveFileBridge());
+  }
+  // No Capacitor, no File System Access API (Firefox/Safari): try the
+  // localhost companion server before falling back to IndexedDB.
+  const http = await import("./http-bridge.js");
+  if (await http.probe()) {
+    hasSaveFile = true;
+    bridgePath = "./http-bridge.js";
+    impl = fileStore;
+    return fileStore.openCollectionDB(await http.getSaveFileBridge());
   }
   return idbStore.openCollectionDB(...args);
 }
@@ -36,12 +50,13 @@ export const putMeta = (...a) => impl.putMeta(...a);
 export const saveMedia = (...a) => impl.saveMedia(...a);
 export const loadMedia = (...a) => impl.loadMedia(...a);
 /** Fetch specific media files by name (lazy cache fill; skipped when missing). */
-export const loadMediaNames = hasSaveFile
-  ? (...a) => fileStore.loadMediaNames(...a)
-  : async (db, names) => {
-      const all = await idbStore.loadMedia(db);
-      return new Map(names.filter((n) => all.has(n)).map((n) => [n, all.get(n)]));
-    };
+export const loadMediaNames = (...a) =>
+  hasSaveFile
+    ? fileStore.loadMediaNames(...a)
+    : (async (db, names) => {
+        const all = await idbStore.loadMedia(db);
+        return new Map(names.filter((n) => all.has(n)).map((n) => [n, all.get(n)]));
+      })(...a);
 export const clearAll = (...a) => impl.clearAll(...a);
 export const deleteCards = (...a) => impl.deleteCards(...a);
 export const deleteNoteAndCards = (...a) => impl.deleteNoteAndCards(...a);
@@ -51,6 +66,6 @@ export const listNoteHistory = (...a) => impl.listNoteHistory(...a);
 export const deleteNoteHistory = (...a) => impl.deleteNoteHistory(...a);
 
 // File-backend extras: no-ops under IndexedDB (which writes through already).
-export const flushStore = hasSaveFile ? (...a) => fileStore.flushStore(...a) : async () => {};
-export const storeStamp = hasSaveFile ? (...a) => fileStore.storeStamp(...a) : () => 0;
-export const storeDirty = hasSaveFile ? (db) => !!db?.dirty : () => false;
+export const flushStore = (...a) => (hasSaveFile ? fileStore.flushStore(...a) : undefined);
+export const storeStamp = (...a) => (hasSaveFile ? fileStore.storeStamp(...a) : 0);
+export const storeDirty = (db) => (hasSaveFile ? !!db?.dirty : false);

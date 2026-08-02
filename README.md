@@ -104,13 +104,32 @@ npm run build:android   # assembles dist/ (scripts/build-capacitor.sh) + npx cap
 
 How it fits together: `web/storage.js` picks the backend at runtime —
 IndexedDB (`src/storage.js`) in plain browsers, or `web/storage-file.js`
-(same function surface over the save folder) on Android or when
-`showOpenFilePicker` exists. The bridge behind it is
-`web/native-bridge.js` (talking to the `SaveFolder` plugin at
-`android/app/src/main/java/dev/phylliida/anki/SaveFolderPlugin.java`) on
-Android, or `web/fs-access-bridge.js` (File System Access API) on the web.
+(same function surface over the save folder) on Android, when
+`showOpenFilePicker` exists, or when the companion server is reachable.
+The bridge behind it is `web/native-bridge.js` (talking to the `SaveFolder`
+plugin at `android/app/src/main/java/dev/phylliida/anki/SaveFolderPlugin.java`)
+on Android, `web/fs-access-bridge.js` (File System Access API) on Chrome/Edge,
+or `web/http-bridge.js` (companion server) on Firefox/Safari.
 The save file is the standard `src/backup.js` format (minus media) plus a
 `history` field, so Backup/Restore stays compatible across platforms.
+
+### Firefox / Safari: companion file server
+
+Those browsers don't implement the File System Access API, so they can't
+write a user-chosen folder directly. Run the minimal (~100-line, audit-
+friendly) Flask companion instead — the app detects it automatically:
+
+```bash
+python3 web/file-server.py /path/to/save-folder
+# prints a connect URL like http://127.0.0.1:8787/web/?token=… — open it
+# (serves the app too), or paste it into the app's connect gate when using
+# the hosted site.
+```
+
+It binds to loopback only, requires the per-start token in an `X-Auth`
+header for all `/api/*` calls (so random websites can't talk to it), and
+writes atomically via tmp+rename. Detection order: native app → File
+System Access API → companion server → IndexedDB fallback.
 
 ## Usage
 
