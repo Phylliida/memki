@@ -38,7 +38,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request
 
 TOKEN = secrets.token_urlsafe(16)
-PORT = 8787
+PORT = int(os.environ.get("OSS_ANKI_PORT", "8787"))
 SAVE = "oss-anki.json"
 MEDIA = "oss-anki.media"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

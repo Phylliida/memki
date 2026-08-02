@@ -2856,9 +2856,12 @@ async function doImport(file) {
     state.mediaUrls.clear();
     sanitizeCurModel(state.col);
     await saveCollection(state.db, state.col);
+    // Show the imported deck(s) NOW — media writes below can take many
+    // seconds on Android (one SAF provider call per file), and with status
+    // messages disabled there'd be no sign anything happened.
+    renderDecks();
     await saveMedia(state.db, media);
     setStatus(`Imported: ${r.added} notes added, ${r.updated} updated.`);
-    renderDecks();
   } catch (e) {
     console.error("import failed:", e);
     alert(`Import failed: ${e?.message ?? e}`);
