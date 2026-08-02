@@ -11,9 +11,10 @@ It also serves the app itself at http://127.0.0.1:8787/web/ — the connect
 URL it prints opens that page with the token already filled in.
 
 The API mirrors what web/http-bridge.js expects (base64 over JSON):
-    GET  /api/stat          -> {exists, modified, size, label}
+    GET  /api/stat          -> {exists, modified, size, label, path}
     GET  /api/read          -> {data: b64|null}          (oss-anki.json)
     POST /api/write         {data: b64, name?} -> {modified}
+    POST /api/root          {path} -> {path, label}      (change save folder)
     GET  /api/media/<name>  -> {data: b64|null}          (oss-anki.media/)
     POST /api/media/<name>  {data: b64} -> {modified}
 
@@ -94,6 +95,13 @@ def write_file(p, b64):
     return {"modified": int(os.stat(p).st_mtime * 1000)}
 
 
+@app.get("/")
+@app.get("/web/")
+def index():
+    # Flask's static handler doesn't resolve directory indexes.
+    return app.send_static_file("web/index.html")
+
+
 @app.get("/api/stat")
 def stat():
     p = os.path.join(ROOT, SAVE)
@@ -103,7 +111,17 @@ def stat():
         modified=int(os.stat(p).st_mtime * 1000) if exists else 0,
         size=os.path.getsize(p) if exists else 0,
         label=os.path.basename(ROOT),
+        path=ROOT,
     )
+
+
+@app.post("/api/root")
+def set_root():
+    global ROOT
+    p = os.path.abspath(os.path.expanduser(request.json["path"]))
+    os.makedirs(p, exist_ok=True)  # typing a new path creates the folder
+    ROOT = p
+    return jsonify(path=ROOT, label=os.path.basename(ROOT))
 
 
 @app.get("/api/read")

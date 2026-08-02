@@ -26,12 +26,18 @@ body {
 
 /* No separate panel color for the header — it blends into the page. */
 header {
+  padding: 8px 24px;
+  background: var(--bg);
+}
+/* Header content rides the same centered column as main. */
+.header-inner {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 12px;
   flex-wrap: wrap;
-  background: var(--bg);
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
 }
 /* The actions bar collapses behind the ☰ menu button; when open it wraps
    to its own full-width row under the menu button instead of crowding it. */

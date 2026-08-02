@@ -70,7 +70,9 @@ export async function probe() {
   if (!loadStored()) return false;
   try {
     const st = await api("/api/stat", {}, 1500);
-    if (st.label && !server.label) store({ ...server, label: st.label });
+    if ((st.label && !server.label) || (st.path && !server.path)) {
+      store({ ...server, label: st.label ?? server.label, path: st.path ?? server.path });
+    }
     return true;
   } catch {
     return false;
@@ -79,7 +81,8 @@ export async function probe() {
 
 /** Human-readable label for the save folder ("" when unknown). */
 export async function folderLabel() {
-  return loadStored()?.label ?? "";
+  const s = loadStored();
+  return s?.path ?? s?.label ?? "";
 }
 
 /** Stat the save file (for external-change detection on the poll). */
@@ -148,14 +151,30 @@ function el(tag, attrs = {}) {
   return n;
 }
 
-/** Re-connect to a (different) server. Returns true when connected. */
+/** Point the server at a (different) save folder path. Returns true on success. */
 export async function pickSaveFolder() {
-  const text = prompt("Connect URL printed by file-server.py:", "http://127.0.0.1:8787/web/?token=");
-  if (!text) return false;
+  if (!loadStored()) {
+    // Not connected yet — connect first (paste the server's connect URL).
+    const text = prompt("Connect URL printed by file-server.py:", "http://127.0.0.1:8787/web/?token=");
+    if (!text) return false;
+    try {
+      store(parseConnectUrl(text));
+      return await probe();
+    } catch {
+      return false;
+    }
+  }
+  const path = prompt(
+    "Save folder path on the machine running file-server.py:",
+    loadStored()?.path ?? "~/oss-anki",
+  );
+  if (!path) return false;
   try {
-    store(parseConnectUrl(text));
-    return await probe();
-  } catch {
+    const r = await api("/api/root", { method: "POST", body: JSON.stringify({ path }) });
+    store({ ...server, label: r.label, path: r.path });
+    return true;
+  } catch (e) {
+    console.error("set save folder failed:", e);
     return false;
   }
 }
