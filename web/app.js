@@ -2828,8 +2828,8 @@ async function doRestore(file) {
     setStatus(`Restored ${collection.cards.size} cards.`);
     renderDecks();
   } catch (e) {
-    setStatus(`Restore failed: ${e.message}`);
-    console.error(e);
+    console.error("restore failed:", e);
+    alert(`Restore failed: ${e?.message ?? e}`);
   }
 }
 
@@ -2860,8 +2860,8 @@ async function doImport(file) {
     setStatus(`Imported: ${r.added} notes added, ${r.updated} updated.`);
     renderDecks();
   } catch (e) {
-    setStatus(`Import failed: ${e.message}`);
-    console.error(e);
+    console.error("import failed:", e);
+    alert(`Import failed: ${e?.message ?? e}`);
   }
 }
 
@@ -2901,6 +2901,7 @@ async function exportDeck(deck) {
   } catch (e) {
     if (/cancelled/i.test(e?.message ?? "")) return; // save-as picker dismissed
     console.error("export failed:", e);
+    alert(`Export failed: ${e?.message ?? e}`);
   }
 }
 
