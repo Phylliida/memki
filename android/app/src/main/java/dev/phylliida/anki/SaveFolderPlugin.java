@@ -14,6 +14,9 @@
 //   readFile({ name })      -> { data: base64 | null }
 //   writeFile({ name, data: base64 }) -> { modified }  (atomic tmp+rename)
 //   statFile({ name })      -> { exists, modified, size }
+//   exportFile({ name, data: base64, mimeType }) -> { uri }
+//                             "save as" picker (ACTION_CREATE_DOCUMENT);
+//                             rejects "CANCELLED"
 //
 // Registered from MainActivity.onCreate via registerPlugin(...).
 
@@ -164,6 +167,58 @@ public class SaveFolderPlugin extends Plugin {
             call.resolve(ret);
         } catch (Exception e) {
             call.reject("write failed: " + e.getMessage(), "IO", e);
+        }
+    }
+
+    // ── "Save as" export (ACTION_CREATE_DOCUMENT) ────────────────
+    // Bytes are stashed in pendingExportBytes because the write can only
+    // happen after the picker returns a document URI.
+    private byte[] pendingExportBytes;
+
+    @PluginMethod
+    public void exportFile(PluginCall call) {
+        String name = call.getString("name");
+        String data = call.getString("data");
+        String mime = call.getString("mimeType", "application/octet-stream");
+        if (name == null || data == null) {
+            call.reject("need name and data", "BAD_INPUT");
+            return;
+        }
+        try {
+            pendingExportBytes = Base64.decode(data, Base64.DEFAULT);
+        } catch (Exception e) {
+            call.reject("bad base64 data", "BAD_INPUT");
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType(mime);
+        intent.putExtra(Intent.EXTRA_TITLE, name); // suggested file name
+        startActivityForResult(call, intent, "exportFileResult");
+    }
+
+    @ActivityCallback
+    private void exportFileResult(PluginCall call, ActivityResult result) {
+        if (call == null) return;
+        try {
+            Intent data = result.getData();
+            Uri uri = data != null ? data.getData() : null;
+            if (uri == null) {
+                call.reject("Export cancelled", "CANCELLED");
+                return;
+            }
+            try (OutputStream out = getContext().getContentResolver()
+                    .openOutputStream(uri, "wt")) { // "wt" truncates an existing pick
+                if (out == null) throw new java.io.IOException("no output stream for picked document");
+                out.write(pendingExportBytes);
+            }
+            JSObject ret = new JSObject();
+            ret.put("uri", uri.toString());
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("export write failed: " + e.getMessage(), "IO", e);
+        } finally {
+            pendingExportBytes = null;
         }
     }
 

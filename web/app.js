@@ -36,7 +36,9 @@ const state = {
 };
 
 const view = () => document.getElementById("view");
-const setStatus = (msg) => { document.getElementById("status").textContent = msg ?? ""; };
+// Status messages are disabled — kept as a no-op so the many call sites
+// stay as-is (errors still go to the console via console.error).
+const setStatus = (_msg) => {};
 
 function el(tag, attrs = {}, ...kids) {
   const n = document.createElement(tag);
@@ -2773,10 +2775,11 @@ async function doExport() {
     const SQL = await loadSql();
     const bytes = exportPackage(state.col, state.media, { SQL });
     if (isNative) {
-      const { writeToFolder, bytesToBase64, folderLabel } = await import("./native-bridge.js");
+      // "Save as" picker — user chooses location + file name.
+      const { exportFile, bytesToBase64 } = await import("./native-bridge.js");
       const name = `oss-anki-export-${new Date().toISOString().slice(0, 10)}.apkg`;
-      await writeToFolder(name, bytesToBase64(bytes));
-      setStatus(`Exported to ${name} in ${await folderLabel()}.`);
+      await exportFile(name, bytesToBase64(bytes), "application/zip"); // .apkg is a zip
+      setStatus("Exported.");
       return;
     }
     const a = document.createElement("a");
@@ -2786,6 +2789,10 @@ async function doExport() {
     URL.revokeObjectURL(a.href);
     setStatus("Exported.");
   } catch (e) {
+    if (/cancelled/i.test(e?.message ?? "")) {
+      setStatus("Export cancelled.");
+      return;
+    }
     setStatus(`Export failed: ${e.message}`);
     console.error(e);
   }

@@ -94,9 +94,15 @@ export async function statSaveFile() {
   return plugin().statFile({ name: SAVE_FILE_NAME });
 }
 
-/** Write an arbitrary file (export .apkg / backup .json) into the save folder. */
+/** Write an arbitrary file (backup .json) into the save folder. */
 export async function writeToFolder(name, base64) {
   return plugin().writeFile({ name, data: base64 });
+}
+
+/** "Save as" picker: user chooses where and under what name to write a
+ *  file (export .apkg). Rejects with code CANCELLED if dismissed. */
+export async function exportFile(name, base64, mimeType = "application/octet-stream") {
+  return plugin().exportFile({ name, data: base64, mimeType });
 }
 
 /** appStateChange wiring: onPause when backgrounded, onResume when back. */
