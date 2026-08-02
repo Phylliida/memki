@@ -2671,20 +2671,46 @@ async function loadSql() {
 async function doBackup() {
   const { collectionToBackup } = await import("../src/backup.js");
   const data = JSON.stringify(collectionToBackup(state.col, state.media));
-  const name = `oss-anki-backup-${new Date().toISOString().slice(0, 10)}.json`;
   if (isNative) {
     // No anchor-download in the Capacitor WebView — write into the save folder.
-    const { writeToFolder, textToBase64, folderLabel } = await import("./native-bridge.js");
-    await writeToFolder(name, textToBase64(data));
-    setStatus(`Backup written to ${name} in ${await folderLabel()}.`);
+    // Same fixed name as the automatic backup: always overwritten.
+    const { writeToFolder, textToBase64, folderLabel, BACKUP_FILE_NAME } = await import("./native-bridge.js");
+    await writeToFolder(BACKUP_FILE_NAME, textToBase64(data));
+    setStatus(`Backup written to ${BACKUP_FILE_NAME} in ${await folderLabel()}.`);
     return;
   }
+  const name = `oss-anki-backup-${new Date().toISOString().slice(0, 10)}.json`;
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([data], { type: "application/json" }));
   a.download = name;
   a.click();
   URL.revokeObjectURL(a.href);
   setStatus("Backup downloaded.");
+}
+
+// --- automatic backup (native app only) ---
+
+// Overwrite the same fixed-name backup file in the save folder on a timer
+// and when the app is backgrounded. Skips empty/unloaded collections so a
+// wiped or half-loaded state can never clobber a good backup.
+const AUTO_BACKUP_INTERVAL_MS = 15 * 60 * 1000;
+let autoBackupRunning = false;
+
+async function autoBackup() {
+  if (!isNative || !state.db || !state.col || autoBackupRunning) return;
+  if (state.col.notes.size === 0) return;
+  autoBackupRunning = true;
+  try {
+    const { collectionToBackup } = await import("../src/backup.js");
+    const { writeToFolder, textToBase64, BACKUP_FILE_NAME } = await import("./native-bridge.js");
+    const data = JSON.stringify(collectionToBackup(state.col, state.media));
+    await writeToFolder(BACKUP_FILE_NAME, textToBase64(data));
+    console.log(`auto-backup wrote ${BACKUP_FILE_NAME}`);
+  } catch (e) {
+    console.error("auto-backup failed:", e);
+  } finally {
+    autoBackupRunning = false;
+  }
 }
 
 async function doRestore(file) {
@@ -2825,13 +2851,31 @@ async function wireNative() {
   updateFolderButton();
   const { watchAppState } = await import("./native-bridge.js");
   watchAppState({
-    onPause: () => flushStore(state.db)?.catch?.((e) => console.error("pause flush failed:", e)),
+    onPause: () => {
+      flushStore(state.db)?.catch?.((e) => console.error("pause flush failed:", e));
+      autoBackup();
+    },
     onResume: () => onNativeResume(),
   });
   window.addEventListener("beforeunload", () => { flushStore(state.db); });
+  setInterval(autoBackup, AUTO_BACKUP_INTERVAL_MS);
 }
 
 function wireHeader() {
+  // ☰ menu: collapse the header actions behind a toggle. State persists
+  // across launches; collapsed by default.
+  const header = document.querySelector("header");
+  const menuBtn = document.getElementById("btn-menu");
+  const actions = header.querySelector(".actions");
+  const setMenuOpen = (open) => {
+    actions.hidden = !open;
+    header.classList.toggle("menu-open", open);
+    menuBtn.setAttribute("aria-expanded", String(open));
+    localStorage.setItem("menuOpen", open ? "1" : "0");
+  };
+  menuBtn.addEventListener("click", () => setMenuOpen(actions.hidden));
+  setMenuOpen(localStorage.getItem("menuOpen") === "1");
+
   document.getElementById("btn-add").addEventListener("click", renderAddCard);
   document.getElementById("btn-browse").addEventListener("click", () => renderBrowse());
   document.getElementById("btn-stats").addEventListener("click", renderStats);

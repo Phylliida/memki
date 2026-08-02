@@ -7,6 +7,10 @@
 // `oss-anki.json`, readable/writable by Syncthing & co.
 
 export const SAVE_FILE_NAME = "oss-anki.json";
+// Automatic backup lives next to the save file under this fixed name —
+// always overwritten, never timestamped, so Syncthing & co. just see one
+// current copy.
+export const BACKUP_FILE_NAME = "oss-anki-backup.json";
 
 const plugin = () => {
   const p = globalThis.Capacitor?.Plugins?.SaveFolder;

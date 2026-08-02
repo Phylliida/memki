@@ -32,9 +32,15 @@ header, footer {
   background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
+/* The actions bar collapses behind the ☰ menu button; when open it wraps
+   to its own full-width row under the title instead of crowding it. */
+header { flex-wrap: wrap; }
+.menu-btn { padding: 6px 10px; font-size: 16px; line-height: 1; }
+.actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.actions[hidden] { display: none; }
+header.menu-open .actions { flex-basis: 100%; margin-left: 0; }
 footer { border-top: 1px solid var(--border); border-bottom: none; font-size: 13px; color: var(--muted); }
 header h1 { font-size: 18px; margin: 0; font-weight: 600; letter-spacing: 0.5px; }
-.actions { margin-left: auto; display: flex; gap: 8px; }
 .grow { flex: 1; }
 .muted { color: var(--muted); }
 
