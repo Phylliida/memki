@@ -73,6 +73,17 @@ export function splitTags(s) {
   return s ? s.split(/\s+/).filter(Boolean) : [];
 }
 
+/** Parse a notes.data JSON string into a plain object ({} on empty/invalid). */
+export function parseNoteData(s) {
+  if (!s) return {};
+  try {
+    const o = JSON.parse(s);
+    return o && typeof o === "object" ? o : {};
+  } catch {
+    return {};
+  }
+}
+
 // --- cards.data (FSRS memory state + extras) ---
 // rslib CardData keys: pos, s, d, dr, decay, lrt, cd. Absent keys are omitted.
 

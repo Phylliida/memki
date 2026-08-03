@@ -1,6 +1,6 @@
 {
-  "appId": "dev.phylliida.anki",
-  "appName": "oss-anki",
+  "appId": "dev.phylliida.memki",
+  "appName": "Memki",
   "webDir": "dist",
   "server": {
     "androidScheme": "https"

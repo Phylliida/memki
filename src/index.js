@@ -1,4 +1,4 @@
-// oss-anki — public entry point.
+// Memki — public entry point.
 //
 // Core (dependency-free): FSRS-6 spaced-repetition memory model + the Anki data
 // model (schema-v11 entities and the text/id helpers needed for exact interop).

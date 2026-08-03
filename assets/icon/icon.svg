@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Source icon for oss-anki: a small stack of note cards.
+<!-- Source icon for Memki: a small stack of note cards.
      icon-foreground.svg is the same artwork minus the background, laid out
      on the 108x108 adaptive-icon canvas with the cards inside the 72dp safe
      zone. Regenerate the Android mipmaps with scripts/generate-icons.sh. -->

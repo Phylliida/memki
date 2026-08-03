@@ -4,13 +4,13 @@
 //
 // Talks to the SaveFolder plugin (android/.../SaveFolderPlugin.java), which
 // wraps a SAF document tree the user picked: the collection lives there as
-// `oss-anki.json`, readable/writable by Syncthing & co.
+// `memki.json`, readable/writable by Syncthing & co.
 
-export const SAVE_FILE_NAME = "oss-anki.json";
+export const SAVE_FILE_NAME = "memki.json";
 // Automatic backup lives next to the save file under this fixed name —
 // always overwritten, never timestamped, so Syncthing & co. just see one
 // current copy.
-export const BACKUP_FILE_NAME = "oss-anki-backup.json";
+export const BACKUP_FILE_NAME = "memki-backup.json";
 
 const plugin = () => {
   const p = globalThis.Capacitor?.Plugins?.SaveFolder;
@@ -81,12 +81,13 @@ export async function pickSaveFolder() {
 export async function getSaveFileBridge() {
   await ensureSaveFolder();
   const p = plugin();
+  await p.migrate(); // one-time rename from pre-rename (oss-anki.*) names
   const name = SAVE_FILE_NAME;
   return {
     read: async () => (await p.readFile({ name })).data ?? null,
     write: async (data) => p.writeFile({ name, data }),
     stat: async () => p.statFile({ name }),
-    // Media: individual files in the oss-anki.media/ subfolder.
+    // Media: individual files in the memki.media/ subfolder.
     readMedia: async (mediaName) => (await p.readMedia({ name: mediaName })).data ?? null,
     writeMedia: async (mediaName, data) => p.writeMedia({ name: mediaName, data }),
   };

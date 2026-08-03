@@ -1,0 +1,1 @@
+Anki-compatible flashcards that live in one file you own — offline, private, syncable anywhere.

@@ -2,7 +2,7 @@
 // uses the File System Access API so the web app can live on a user-chosen
 // save folder (same storage-file.js backend as the Android app), instead
 // of IndexedDB. Pick the folder your phone syncs via Syncthing and both
-// devices edit the same oss-anki.json (+ oss-anki.media/) files.
+// devices edit the same memki.json (+ memki.media/) files.
 //
 // Permission model: the directory handle is stored in IndexedDB and
 // survives restarts, so the folder is picked once, ever. Write permission
@@ -14,12 +14,12 @@
 // (ensureSaveFolder / getSaveFileBridge / pickSaveFolder / folderLabel /
 // statSaveFile) so callers just dispatch on platform.
 
-export const SAVE_FILE_NAME = "oss-anki.json";
+export const SAVE_FILE_NAME = "memki.json";
 // Automatic backup lives next to the save file under this fixed name —
 // always overwritten, never timestamped, so Syncthing & co. just see one
 // current copy.
-export const BACKUP_FILE_NAME = "oss-anki-backup.json";
-const MEDIA_DIR = "oss-anki.media";
+export const BACKUP_FILE_NAME = "memki-backup.json";
+const MEDIA_DIR = "memki.media";
 
 // The picked FileSystemDirectoryHandle, cached in memory + IndexedDB.
 let cachedHandle;
@@ -178,10 +178,47 @@ export async function ensureSaveFolder() {
   }
 }
 
+/** One-time rename from pre-rename (oss-anki.*) names in the chosen folder. */
+async function migrate(dir) {
+  const renames = [["oss-anki.json", SAVE_FILE_NAME], ["oss-anki-backup.json", BACKUP_FILE_NAME]];
+  for (const [oldName, newName] of renames) {
+    try {
+      const oldH = await dir.getFileHandle(oldName);
+      try {
+        await dir.getFileHandle(newName);
+        continue; // new name already exists — leave both alone
+      } catch {
+        const f = await oldH.getFile();
+        const w = await (await dir.getFileHandle(newName, { create: true })).createWritable();
+        await w.write(await f.arrayBuffer());
+        await w.close();
+        await dir.removeEntry(oldName);
+      }
+    } catch { /* no old file */ }
+  }
+  try {
+    const oldDir = await dir.getDirectoryHandle("oss-anki.media");
+    try {
+      await dir.getDirectoryHandle(MEDIA_DIR); // new dir exists — leave alone
+    } catch {
+      const newDir = await dir.getDirectoryHandle(MEDIA_DIR, { create: true });
+      for await (const [name, h] of oldDir.values()) {
+        if (h.kind !== "file") continue;
+        const f = await h.getFile();
+        const w = await (await newDir.getFileHandle(name, { create: true })).createWritable();
+        await w.write(await f.arrayBuffer());
+        await w.close();
+      }
+      await dir.removeEntry("oss-anki.media", { recursive: true });
+    }
+  } catch { /* no old media dir */ }
+}
+
 /** Bridge for web/storage-file.js bound to the save file in the chosen folder. */
 export async function getSaveFileBridge() {
   await ensureSaveFolder();
   const dir = await loadHandle();
+  await migrate(dir); // one-time rename from pre-rename (oss-anki.*) names
   return {
     read: async () => {
       try {
@@ -193,7 +230,7 @@ export async function getSaveFileBridge() {
     write: async (data) =>
       writeFileBase64(await dir.getFileHandle(SAVE_FILE_NAME, { create: true }), data),
     stat: statSaveFile,
-    // Media: individual files in the oss-anki.media/ subfolder.
+    // Media: individual files in the memki.media/ subfolder.
     readMedia: async (name) => {
       const md = await mediaDir(false);
       if (!md) return null;

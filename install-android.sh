@@ -25,7 +25,7 @@ set -euo pipefail
 
 WORKFLOW="android-build.yml"
 ARTIFACT_NAME="oss-anki-debug-apk"
-DEFAULT_APK_OUT="${PWD}/oss-anki.apk"
+DEFAULT_APK_OUT="${PWD}/Memki.apk"
 APK_OUT="${APK_OUT:-$DEFAULT_APK_OUT}"
 
 # Temp dir cleanup unless APK_KEEP=1 is set (debugging).
@@ -131,4 +131,4 @@ echo "→ Installing $APK_OUT..."
 # stale local APK doesn't refuse to install over a newer copy on the
 # device. Useful when iterating between branches.
 adb -s "$DEVICE" install -r -d "$APK_OUT"
-echo "✓ Done. Launch oss-anki from the app drawer."
+echo "✓ Done. Launch Memki from the app drawer."

@@ -1,11 +1,11 @@
-// oss-anki browser app: local-first study UI over the oss-anki core library.
+// Memki browser app: local-first study UI over the Memki core library.
 // Fully offline: .apkg import/export lazily loads vendored sql.js + fflate +
 // fzstd builds from ../vendor/ (see the import map in index.html).
 
 import {
   Collection, Note, Card, NoteTypeKind, CardType, CardQueue, RevlogType, imageOcclusionNoteType,
   basicNoteType, basicReversedNoteType, basicOptionalReversedNoteType, basicTypeNoteType, clozeNoteType,
-  cardFlagSet, writeCardFlags,
+  cardFlagSet, writeCardFlags, parseNoteData,
 } from "../src/model.js";
 import { Scheduler } from "../src/scheduler.js";
 import { renderCard, cardOrdinalsForNote } from "../src/template.js";
@@ -60,6 +60,12 @@ function show(...nodes) {
   v.replaceChildren(...nodes);
 }
 
+// Highlight the header button of the current view (null clears all).
+function setActiveNav(id) {
+  document.querySelectorAll(".actions button").forEach((b) =>
+    b.classList.toggle("active", b.id === id));
+}
+
 function debounced(fn, ms = 180) {
   let t;
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
@@ -78,6 +84,9 @@ const ICONS = {
   funnel: '<svg viewBox="0 0 24 24"><path d="M22 3H2l8 9.5V21l4-2v-6.5z"/></svg>',
   info: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>',
   x: '<svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  "align-left": '<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h13"/></svg>',
+  "align-center": '<svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M5.5 18h13"/></svg>',
+  "align-right": '<svg viewBox="0 0 24 24"><path d="M4 6h16M10 12h10M7 18h13"/></svg>',
 };
 
 /** A minimal inline SVG icon. */
@@ -784,9 +793,11 @@ function cardFace(html) {
   return el("div", { class: "card-face" }, el("div", { class: "card", html: displayHtml(html) }));
 }
 
-/** Typeset any math in the current view (MathJax loads async via index.html). */
-function typesetMath() {
-  if (window.MathJax?.typesetPromise) window.MathJax.typesetPromise([view()]).catch(() => {});
+/** Typeset any math under node (MathJax loads async via index.html).
+ *  Defaults to the current view; previews render outside #view, so pass
+ *  their container. */
+function typesetMath(node = view()) {
+  if (window.MathJax?.typesetPromise) window.MathJax.typesetPromise([node]).catch(() => {});
 }
 
 // --- formatting ---
@@ -909,6 +920,7 @@ function renderCustomStudy(sourceDeckId) {
 function renderDecks() {
   state.deckId = null;
   state.card = null;
+  setActiveNav(null);
   const sched = new Scheduler(state.col, { fuzz: true });
   const decks = Object.values(state.col.decks).sort((a, b) => a.name.localeCompare(b.name));
   const rows = decks.map((d) => {
@@ -1242,6 +1254,7 @@ function tagBubblePicker(selected, onChange) {
 
 function renderAddCard() {
   state.card = null;
+  setActiveNav("btn-add");
   const models = Object.values(state.col.models);
   const decks = Object.values(state.col.decks).filter((d) => !d.dyn);
   const modelSel = el("select", {}, ...models.map((m) => el("option", { value: m.id }, m.name)));
@@ -1493,6 +1506,7 @@ function termInQuery(q, term) {
 
 function renderBrowse() {
   state.card = null;
+  setActiveNav("btn-browse");
   // Multiple filters: each filter is an AND of its terms (the text in the
   // search bar is that filter's query, chips just edit the text); "All
   // filters" shows the union (OR) of every non-empty filter.
@@ -2033,26 +2047,55 @@ function noteEditorForm(noteId, cb = {}) {
   };
 
   const cardCount = state.col.cardsForNote(noteId).length;
+  // Per-field text alignment for rendered cards (stored in notes.data falign,
+  // keyed by field ord; absent = the note type's default, i.e. center). The
+  // header button cycles left → center → right; the field editor mirrors it.
+  const ALIGN_CYCLE = ["left", "center", "right"];
+  const alignOf = (ord) => parseNoteData(note.data).falign?.[ord] ?? "center";
+  const alignBtn = (f, ed) => {
+    const show = (a) => {
+      btn.replaceChildren(icon(`align-${a}`));
+      btn.title = `Alignment: ${a} (click to change)`;
+      ed.el.style.textAlign = a;
+    };
+    const btn = el("button", { type: "button", class: "icon fld-align", onclick: async () => {
+      const next = ALIGN_CYCLE[(ALIGN_CYCLE.indexOf(alignOf(f.ord)) + 1) % ALIGN_CYCLE.length];
+      const d = parseNoteData(note.data);
+      if (next === "center") delete d.falign?.[f.ord];
+      else (d.falign ??= {})[f.ord] = next;
+      if (d.falign && !Object.keys(d.falign).length) delete d.falign;
+      note.data = JSON.stringify(d);
+      note.mod = Math.floor(Date.now() / 1000);
+      await putNote(state.db, note);
+      show(next);
+      schedulePvPop(); // the preview reflects the new alignment
+    } });
+    show(alignOf(f.ord));
+    return btn;
+  };
   const fieldsBox = el("div", { class: "form ne-fields" },
-    ...inputs.map(({ f, ed }) => el("div", { class: "fld" }, el("span", {}, f.name), ed.el)));
+    ...inputs.map(({ f, ed }) => el("div", { class: "fld" },
+      el("div", { class: "fld-head" }, el("span", {}, f.name), alignBtn(f, ed)),
+      ed.el)));
   fieldsBox.addEventListener("input", (e) => {
     if (!isMediaEvent(e)) scheduleSave();
-    if (pvBox) schedulePvPop();
+    schedulePvPop();
   });
   fieldsBox.addEventListener("focusout", () => {
     if (saveTimer) { clearTimeout(saveTimer); doSave(); }
   });
 
-  // Preview modal (centered, like Change note type): the note's first card
-  // rendered front + back through the real pipeline, live-updated while open.
-  let pvBox = null; // content container while the modal is open
+  // Live preview: the note's first card rendered front + back through the
+  // real pipeline, below the fields (beside them on wide screens in the
+  // browse pane), updated as you type.
+  const pvBox = el("div", { class: "ne-pv" });
   const updatePvPop = async () => {
-    if (!pvBox) return;
+    if (!pvBox.isConnected) return; // editor closed/replaced meanwhile
     if (model.ossIO) {
       // Image occlusion notes render their own face (fields are image + mask
       // JSON, edited by the occlusion tool — preview the saved note).
       await ensureMedia(mediaNamesInIONote(note));
-      if (!pvBox) return; // modal closed while media loaded
+      if (!pvBox.isConnected) return;
       pvBox.replaceChildren(occlusionFace(note, 0, "q"));
       wireSoundVolumes(pvBox);
       return;
@@ -2068,7 +2111,7 @@ function noteEditorForm(noteId, cb = {}) {
     const deckName = state.col.decks[String(state.col.cardsForNote(note.id)[0]?.did ?? 1)]?.name ?? "";
     const { question, answer } = renderCard(model, ords[0], tmpNote, { deckName });
     await ensureMedia([...mediaNamesInHtml(question), ...mediaNamesInHtml(answer)]);
-    if (!pvBox) return; // modal closed while media loaded
+    if (!pvBox.isConnected) return;
     pvBox.replaceChildren(
       el("div", { class: "muted pv-count" },
         `Previewing "${model.tmpls[model.type === NoteTypeKind.Cloze ? 0 : ords[0]]?.name ?? ""}"`),
@@ -2076,22 +2119,19 @@ function noteEditorForm(noteId, cb = {}) {
       el("div", { class: "card-face pv" }, el("div", { class: "card", html: displayHtml(answer) })),
     );
     wireSoundVolumes(pvBox);
-    typesetMath();
+    typesetMath(pvBox);
   };
   const schedulePvPop = debounced(updatePvPop);
-  const pvBtn = el("button", { type: "button", onclick: () => {
-    pvBox = el("div", { class: "ne-pv-modal" });
-    openModal([el("h3", {}, "Preview"), pvBox], { onClose: () => { pvBox = null; } });
-    updatePvPop();
-  } }, "Preview");
+  // First paint: run after the caller has attached the form (MathJax and
+  // media sizing need layout).
+  queueMicrotask(updatePvPop);
 
   const refresh = () => (cb.onCardsChanged ?? cb.onAutoSaved ?? (() => {}))();
   const noteCards = state.col.cardsForNote(noteId);
   return el("div", { class: "form note-editor" },
     el("div", { class: "muted ne-head" },
       `${model.name} · ${cardCount} card${cardCount === 1 ? "" : "s"} share this note · edits save automatically`),
-    el("div", { class: "ne-pv-row" }, pvBtn),
-    fieldsBox,
+    el("div", { class: "ne-main" }, fieldsBox, pvBox),
     el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Tags"), tagBox),
     el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Flags"),
       flagPicker(cardFlagSet(noteCards[0] ?? { flags: 0 }),
@@ -2652,6 +2692,7 @@ function occlusionFace(note, ord, side) {
 
 function renderNoteTypes() {
   state.card = null;
+  setActiveNav("btn-types");
   const models = Object.values(state.col.models);
 
   // "+ New" opens a popout panel (no native prompt/confirm popups).
@@ -2855,6 +2896,7 @@ function barChart(values, color, height = 90) {
 
 function renderStats() {
   state.card = null;
+  setActiveNav("btn-stats");
   const today = new Scheduler(state.col).daysElapsed;
   const s = collectionStats(state.col, today, 30);
   const c = s.counts;
@@ -3250,7 +3292,10 @@ function wireHeader() {
     menuBtn.setAttribute("aria-expanded", String(open));
     localStorage.setItem("menuOpen", open ? "1" : "0");
   };
-  menuBtn.addEventListener("click", () => setMenuOpen(actions.hidden));
+  menuBtn.addEventListener("click", () => {
+    setMenuOpen(actions.hidden);
+    menuBtn.blur(); // don't leave the ☰ looking focused/highlighted after a tap
+  });
   setMenuOpen(localStorage.getItem("menuOpen") === "1");
 
   document.getElementById("btn-add").addEventListener("click", renderAddCard);

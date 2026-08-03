@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""oss-anki companion file server — file storage for browsers without the
+"""Memki companion file server — file storage for browsers without the
 File System Access API (Firefox, Safari).
 
 Run it next to your save folder and paste the printed connect URL into the
@@ -12,10 +12,10 @@ URL it prints opens that page with the token already filled in.
 
 The API mirrors what web/http-bridge.js expects (base64 over JSON):
     GET  /api/stat          -> {exists, modified, size, label, path}
-    GET  /api/read          -> {data: b64|null}          (oss-anki.json)
+    GET  /api/read          -> {data: b64|null}          (memki.json)
     POST /api/write         {data: b64, name?} -> {modified}
     POST /api/root          {path} -> {path, label}      (change save folder)
-    GET  /api/media/<name>  -> {data: b64|null}          (oss-anki.media/)
+    GET  /api/media/<name>  -> {data: b64|null}          (memki.media/)
     POST /api/media/<name>  {data: b64} -> {modified}
 
 Security notes (deliberately simple, please audit):
@@ -39,8 +39,8 @@ from flask import Flask, jsonify, request
 
 TOKEN = secrets.token_urlsafe(16)
 PORT = int(os.environ.get("OSS_ANKI_PORT", "8787"))
-SAVE = "oss-anki.json"
-MEDIA = "oss-anki.media"
+SAVE = "memki.json"
+MEDIA = "memki.media"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Save folder: CLI arg if given, else ./save inside the repo.
 ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.join(REPO, "save")
@@ -121,6 +121,7 @@ def set_root():
     global ROOT
     p = os.path.abspath(os.path.expanduser(request.json["path"]))
     os.makedirs(p, exist_ok=True)  # typing a new path creates the folder
+    migrate(p)
     ROOT = p
     return jsonify(path=ROOT, label=os.path.basename(ROOT))
 
@@ -147,7 +148,19 @@ def write_media(name):
     return jsonify(**write_file(os.path.join(ROOT, MEDIA, clean(name)), request.json["data"]))
 
 
+OLD_NAMES = [("oss-anki.json", SAVE), ("oss-anki-backup.json", "memki-backup.json"), ("oss-anki.media", MEDIA)]
+
+
+def migrate(root):
+    """One-time rename from pre-rename (oss-anki.*) file names."""
+    for old, new in OLD_NAMES:
+        old_p, new_p = os.path.join(root, old), os.path.join(root, new)
+        if os.path.exists(old_p) and not os.path.exists(new_p):
+            os.rename(old_p, new_p)
+
+
 if __name__ == "__main__":
-    print(f"oss-anki save folder: {ROOT}")
+    migrate(ROOT)
+    print(f"Memki save folder: {ROOT}")
     print(f"connect URL: http://127.0.0.1:{PORT}/web/?token={TOKEN}")
     app.run(host="127.0.0.1", port=PORT)

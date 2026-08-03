@@ -1,7 +1,7 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace "dev.phylliida.anki"
+    namespace "dev.phylliida.memki"
     compileSdk rootProject.ext.compileSdkVersion
     // Pinned debug signing: every build (local or CI) signs debug APKs
     // with this committed keystore, so `adb install -r` updates work
@@ -19,7 +19,7 @@ android {
         }
     }
     defaultConfig {
-        applicationId "dev.phylliida.anki"
+        applicationId "dev.phylliida.memki"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

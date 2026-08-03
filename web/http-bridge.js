@@ -8,8 +8,8 @@
 // statSaveFile / writeToFolder / textToBase64) so callers just dispatch on
 // storage.js's bridgePath.
 
-export const SAVE_FILE_NAME = "oss-anki.json";
-export const BACKUP_FILE_NAME = "oss-anki-backup.json";
+export const SAVE_FILE_NAME = "memki.json";
+export const BACKUP_FILE_NAME = "memki-backup.json";
 
 const LS_KEY = "fileServer"; // { url, token, label }
 let server = null;           // { url, token, label } | null
@@ -218,7 +218,7 @@ export async function pickSaveFolder() {
   }
   const path = prompt(
     "Save folder path on the machine running file-server.py:",
-    loadStored()?.path ?? "~/oss-anki",
+    loadStored()?.path ?? "~/memki",
   );
   if (!path) return false;
   try {

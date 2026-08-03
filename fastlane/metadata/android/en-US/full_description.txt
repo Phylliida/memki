@@ -1,0 +1,12 @@
+Memki is a spaced-repetition flashcard app that speaks Anki's language — it imports and exports standard .apkg decks, including scheduling state — while keeping your whole collection in a single JSON file plus a media folder that you choose.
+
+Everything runs on your device: no account, no cloud, no analytics, no network access at all. Point your favorite sync tool (Syncthing, Nextcloud, …) at the save folder and your cards stay in step across your phone and computers, where the same app also runs in any modern browser.
+
+Features:
+ • Full FSRS-6 and SM-2 scheduling, matching Anki's v3 scheduler
+ • Import/export .apkg decks with notes, media, and review history intact
+ • Automatic rolling backups alongside the save file
+ • Per-deck options: daily limits, learning steps, burying, easy days, load balancing
+ • Markdown card editor with math (MathJax), syntax-highlighted code, images, and audio
+ • Image occlusion cards, cloze deletions, custom study, and filtered decks
+ • Fully offline and open source (MIT)

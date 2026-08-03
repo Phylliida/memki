@@ -18,7 +18,7 @@
 // untouched for the caller to rewrite to object URLs / players.
 
 import { stripHtml } from "./text.js";
-import { NoteTypeKind } from "./model.js";
+import { NoteTypeKind, parseNoteData } from "./model.js";
 import { mdToHtml } from "./markdown.js";
 
 const TOKEN = /\{\{\s*([#^/])?\s*([^}]+?)\s*\}\}/g;
@@ -381,6 +381,17 @@ export function renderCard(noteType, ord, note, opts = {}) {
   // Inline/block HTML in legacy fields passes through mdToHtml unchanged.
   const fields = fieldMap(noteType, note);
   for (const k in fields) fields[k] = mdToHtml(fields[k]);
+  // Per-field alignment overrides (notes.data falign, keyed by field ord).
+  // Empty fields are left alone so {{#Field}} conditionals still work.
+  const falign = parseNoteData(note.data).falign;
+  if (falign) {
+    for (const f of noteType.flds) {
+      const a = falign[f.ord];
+      if ((a === "left" || a === "right" || a === "center") && fields[f.name]) {
+        fields[f.name] = `<div style="text-align:${a}">${fields[f.name]}</div>`;
+      }
+    }
+  }
   const base = {
     fields,
     Tags: (note.tags ?? []).join(" "),

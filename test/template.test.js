@@ -186,3 +186,24 @@ test("math and [sound:] in fields pass through markdown untouched", () => {
   const note = new Note({ mid: 24, fields: ["\\(x_i\\) [sound:snd_1.mp3]", "A"] });
   assert.equal(renderCard(nt, 0, note).question, "\\(x_i\\) [sound:snd_1.mp3]");
 });
+
+test("notes.data falign wraps the field in a text-align div", () => {
+  const nt = basicNoteType(25);
+  const note = new Note({ mid: 25, fields: ["Q", "A"], data: '{"falign":{"0":"left","1":"right"}}' });
+  const { question, answer } = renderCard(nt, 0, note);
+  assert.equal(question, '<div style="text-align:left">Q</div>');
+  assert.match(answer, /<div style="text-align:right">A<\/div>$/);
+});
+
+test("falign leaves empty fields empty so {{#Field}} conditionals still work", () => {
+  const nt = basicNoteType(26);
+  nt.tmpls[0].qfmt = "{{Front}}{{#Back}} [has back]{{/Back}}";
+  const note = new Note({ mid: 26, fields: ["Q", ""], data: '{"falign":{"1":"left"}}' });
+  assert.equal(renderCard(nt, 0, note).question, "Q");
+});
+
+test("no falign (or invalid notes.data) renders fields unwrapped", () => {
+  const nt = basicNoteType(27);
+  assert.equal(renderCard(nt, 0, new Note({ mid: 27, fields: ["Q", "A"] })).question, "Q");
+  assert.equal(renderCard(nt, 0, new Note({ mid: 27, fields: ["Q", "A"], data: "not json" })).question, "Q");
+});

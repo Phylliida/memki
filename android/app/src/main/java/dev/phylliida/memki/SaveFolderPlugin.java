@@ -1,6 +1,6 @@
 // Capacitor plugin: let the user pick a folder (SAF document tree) and
-// read/write individual files inside it. oss-anki keeps its whole collection
-// in `oss-anki.json` there so external tools (Syncthing etc.) can sync it.
+// read/write individual files inside it. Memki keeps its whole collection
+// in `memki.json` there so external tools (Syncthing etc.) can sync it.
 //
 // The picked tree URI is persisted (takePersistableUriPermission) and stored
 // in SharedPreferences, so the choice survives restarts. Writes go to a
@@ -15,7 +15,7 @@
 //   writeFile({ name, data: base64 }) -> { modified }  (atomic tmp+rename)
 //   statFile({ name })      -> { exists, modified, size }
 //   readMedia({ name })     -> { data: base64 | null }   } media lives in an
-//   writeMedia({ name, data: base64 }) -> { modified }   } "oss-anki.media"
+//   writeMedia({ name, data: base64 }) -> { modified }   } "memki.media"
 //                                                          } subfolder
 //   exportFile({ name, data: base64, mimeType }) -> { uri }
 //                             "save as" picker (ACTION_CREATE_DOCUMENT);
@@ -23,7 +23,7 @@
 //
 // Registered from MainActivity.onCreate via registerPlugin(...).
 
-package dev.phylliida.anki;
+package dev.phylliida.memki;
 
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -242,8 +242,29 @@ public class SaveFolderPlugin extends Plugin {
         return dir != null ? dir.findFile(name) : null;
     }
 
-    // ── Media files (oss-anki.media/ subfolder of the save folder) ──
-    private static final String MEDIA_DIR = "oss-anki.media";
+    // ── Media files (memki.media/ subfolder of the save folder) ──
+    private static final String MEDIA_DIR = "memki.media";
+
+    /**
+     * One-time rename from the pre-rename (oss-anki.*) file names. Called by
+     * the bridge before opening the store; renames only when the old file
+     * exists and the new one doesn't.
+     */
+    @PluginMethod
+    public void migrate(PluginCall call) {
+        DocumentFile dir = tree();
+        if (dir != null) {
+            renameIfOrphan(dir, "oss-anki.json", "memki.json");
+            renameIfOrphan(dir, "oss-anki-backup.json", "memki-backup.json");
+            renameIfOrphan(dir, "oss-anki.media", MEDIA_DIR);
+        }
+        call.resolve();
+    }
+
+    private void renameIfOrphan(DocumentFile dir, String oldName, String newName) {
+        DocumentFile oldFile = dir.findFile(oldName);
+        if (oldFile != null && dir.findFile(newName) == null) oldFile.renameTo(newName);
+    }
 
     private DocumentFile mediaDir(boolean create) {
         DocumentFile dir = tree();

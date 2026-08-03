@@ -42,7 +42,13 @@ header {
   padding: 0 24px;
   box-sizing: border-box;
 }
-.menu-btn { padding: 6px 10px; font-size: 16px; line-height: 1; }
+.menu-btn { padding: 6px 10px; font-size: 16px; line-height: 1; -webkit-tap-highlight-color: transparent; }
+/* On touch, :hover sticks after a tap — don't keep the ☰ highlighted. */
+@media (hover: none) {
+  .menu-btn:hover { border-color: var(--border); }
+}
+/* The current view's header button stays highlighted. */
+.actions button.active { border-color: var(--accent); color: var(--accent); }
 /* Buttons flow inline next to ☰ when the menu is open (left-aligned),
    wrapping below when the row runs out of room. */
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -242,6 +248,10 @@ a.hint { display: inline-block; color: var(--accent); }
    label activates its first labelable control — which would be the first
    toolbar button (it "auto-bolded" before this was a div). */
 .form .fld { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
+/* Field header: name left, per-field alignment toggle right. */
+.fld-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.fld-align { padding: 2px 6px; color: var(--muted); }
+.fld-align:hover { color: var(--text); }
 .form input, .form textarea, .form select {
   background: var(--panel-2); color: var(--text);
   border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 15px; font-family: inherit;
@@ -340,9 +350,19 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 .nt-pop .nt-cloze-row { align-items: center; }
 
 /* Note-editor preview modal: cards stacked, a bit wider than the default. */
-.ne-pv-row { display: flex; }
-.ne-pv-modal { display: flex; flex-direction: column; gap: 10px; min-width: min(560px, calc(100vw - 100px)); }
-.ne-pv-modal .card-face { margin: 0; }
+/* Inline card preview in the note editor: below the fields by default. */
+.ne-main { display: flex; flex-direction: column; gap: 12px; }
+.ne-pv { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.ne-pv:empty { display: none; }
+.ne-pv .card-face { margin: 0; }
+/* Wide desktop: the browse edit pane grows a second column — preview beside
+   the fields (four columns overall: filters | list | editor | preview). */
+@media (min-width: 1550px) {
+  main:has(.browse-layout) { max-width: 1800px; }
+  .browse-edit { flex-basis: 940px; }
+  .browse-edit .ne-main { flex-direction: row; align-items: flex-start; }
+  .browse-edit .ne-main > * { flex: 1 1 0; min-width: 0; }
+}
 
 /* Flag bubbles (immediate set; one flag per card) */
 .flag-picker { display: inline-flex; gap: 4px; align-items: center; }

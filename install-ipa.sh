@@ -24,7 +24,7 @@ set -euo pipefail
 
 WORKFLOW="ios-build.yml"
 ARTIFACT_NAME="oss-anki-ipa"
-DEFAULT_IPA_OUT="${PWD}/oss-anki.ipa"
+DEFAULT_IPA_OUT="${PWD}/Memki.ipa"
 IPA_OUT="${IPA_OUT:-$DEFAULT_IPA_OUT}"
 
 # Temp dir cleanup unless IPA_KEEP=1 is set (debugging).

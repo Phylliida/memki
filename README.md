@@ -1,4 +1,4 @@
-# oss-anki
+# Memki
 
 Open-source, framework-free implementation of [Anki](https://apps.ankiweb.net/):
 a precise spaced-repetition core with the goal of **full round-trip interop** with
@@ -79,9 +79,9 @@ Chrome/Edge it can use the same file-backed storage via the File System
 Access API. In both, persistence switches from IndexedDB to a **save folder
 you choose**: on first launch you're asked to pick a folder (SAF picker on
 Android, directory picker on the web), and the collection lives there as
-`oss-anki.json` — read at startup and rewritten (debounced, atomic
+`memki.json` — read at startup and rewritten (debounced, atomic
 tmp+rename) as you study and edit. **Media is NOT in the JSON**: images and
-audio are individual files in an `oss-anki.media/` subfolder, written when
+audio are individual files in an `memki.media/` subfolder, written when
 added and fetched lazily when displayed, so reviewing a card only rewrites
 the small text JSON even for huge media libraries. (Save files from before
 the split are migrated on first load.)
@@ -89,7 +89,7 @@ the split are migrated on first load.)
 Point a sync tool like Syncthing at that folder to keep devices in sync;
 while the app is open a 3-second poll picks up external changes
 (last-writer-wins, no merge). The header's **Folder** button shows/changes
-the folder; **Backup** writes a fixed-name `oss-anki-backup.json` into it
+the folder; **Backup** writes a fixed-name `memki-backup.json` into it
 (also refreshed automatically every 15 min and on backgrounding) and greys
 out when it's already up to date; **History** shows recent saves/loads. On
 the web, the folder grant may need one click per browser session (none when
@@ -137,7 +137,7 @@ storage.
 ## Usage
 
 ```js
-import { FSRS, Rating } from "oss-anki/fsrs";
+import { FSRS, Rating } from "memki/fsrs";
 
 const fsrs = new FSRS(); // default FSRS-6 weights, 0.9 desired retention
 

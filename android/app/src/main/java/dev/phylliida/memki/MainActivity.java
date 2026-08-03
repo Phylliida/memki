@@ -1,4 +1,4 @@
-package dev.phylliida.anki;
+package dev.phylliida.memki;
 
 import android.os.Bundle;
 

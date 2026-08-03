@@ -18,7 +18,7 @@
 //   writeMedia(name, b64) -> Promise<void>
 //
 // Media does NOT live in the JSON: it's individual files in an
-// `oss-anki.media/` sibling folder, so reviewing a card rewrites only the
+// `memki.media/` sibling folder, so reviewing a card rewrites only the
 // (small) text JSON and Syncthing only moves genuinely new media. Save files
 // written by older versions may still embed base64 media — loadCollection
 // migrates those out to files on first read.
