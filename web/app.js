@@ -2069,7 +2069,7 @@ function renderDeckOptions(deckId) {
   const gradGood = num(ints[0] ?? 1);
   const gradEasy = num(ints[1] ?? 4);
   const startEase = num((nu.initialFactor ?? 2500) / 1000, "0.01");
-  const newBury = check(nu.bury ?? true);
+  const newBury = check(nu.bury ?? false);
 
   const revPerDay = num(rev.perDay ?? 200);
   const newIgnoreRev = check(nu.ignoreReviewLimit ?? false);
@@ -2078,18 +2078,37 @@ function renderDeckOptions(deckId) {
   const easyBonus = num(rev.ease4 ?? 1.3, "0.05");
   const ivlMod = num(rev.ivlFct ?? 1.0, "0.05");
   const hardFactor = num(rev.hardFactor ?? 1.2, "0.05");
-  const revBury = check(rev.bury ?? true);
+  const revBury = check(rev.bury ?? false);
 
   const lapseSteps = txt((lapse.delays ?? [10]).join(" "));
   const leechFails = num(lapse.leechFails ?? 8);
   const minInt = num(lapse.minInt ?? 1);
   const newIvlPct = num(Math.round((lapse.mult ?? 0) * 100));
   const leechAction = el("select", {}, el("option", { value: 0 }, "Suspend"), el("option", { value: 1 }, "Tag only"));
-  leechAction.value = String(lapse.leechAction ?? 0);
+  leechAction.value = String(lapse.leechAction ?? 1);
 
   const fsrsOn = check(state.col.conf.fsrs === true);
   const retention = num(dc.desiredRetention ?? state.col.conf.desiredRetention ?? 0.9, "0.01");
   const fsrsParams = txt((dc.fsrsParams6 ?? []).join(", "));
+
+  // Easy days (load balancer): tap a weekday to cycle normal → reduced → minimum.
+  const easyDays = [...(dc.easyDays ?? [1, 1, 1, 1, 1, 1, 1])];
+  const easyRow = el("div", { class: "easy-days" },
+    ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label, i) => {
+      const b = el("button", { type: "button", class: "easy-day" }, label);
+      const paint = () => {
+        const v = easyDays[i];
+        b.classList.toggle("ed-reduced", v > 0 && v < 1);
+        b.classList.toggle("ed-minimum", v === 0);
+        b.title = `${label}: ${v === 1 ? "normal load" : v === 0 ? "minimum — almost nothing scheduled" : "reduced load (~half)"}`;
+      };
+      b.addEventListener("click", () => {
+        easyDays[i] = easyDays[i] === 1 ? 0.5 : easyDays[i] === 0.5 ? 0 : 1;
+        paint();
+      });
+      paint();
+      return b;
+    }));
 
   const newOrder = el("select", {}, el("option", { value: 1 }, "Sequential (oldest first)"), el("option", { value: 0 }, "Random"));
   newOrder.value = String(nu.order ?? 1);
@@ -2155,6 +2174,8 @@ function renderDeckOptions(deckId) {
     const ps = fsrsParams.value.split(/[\s,]+/).map(Number).filter((n) => Number.isFinite(n));
     if ([17, 19, 21].includes(ps.length)) dc.fsrsParams6 = ps;
     else if (ps.length === 0) delete dc.fsrsParams6;
+    if (easyDays.some((v) => v !== 1)) dc.easyDays = [...easyDays];
+    else delete dc.easyDays; // all-normal is the default — keep the config clean
     await putMeta(state.db, state.col);
     setStatus("Deck options saved.");
     renderDecks();
@@ -2237,6 +2258,8 @@ function renderDeckOptions(deckId) {
         "The fraction of reviews you want to answer correctly. Higher means more frequent reviews: 0.90 is the default; 0.95 roughly doubles your workload."),
       field("Parameters (17/19/21 numbers, comma-separated; blank = default)", fsrsParams,
         "FSRS weights fitted to your review history (from Anki's optimizer). Leave blank to use the stock FSRS-6 defaults."),
+      field("Easy days (tap to cycle)", easyRow,
+        "How much review load the load balancer may place on each weekday: normal, reduced (about half), or minimum (almost nothing — for days off). Applies to this options group when the load balancer is on."),
       el("h3", {}, "Collection preferences"),
       field("Next day starts at (hour, 0–23)", rolloverHour,
         "The hour when the scheduling day rolls over. At 4, studying at 2 AM still counts as yesterday — so late-night sessions don't split across two days."),

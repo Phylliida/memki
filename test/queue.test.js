@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { Scheduler } from "../src/scheduler.js";
-import { Collection, Note, Card, CardType, CardQueue } from "../src/model.js";
+import { Collection, Note, Card, CardType, CardQueue, Revlog, RevlogType } from "../src/model.js";
 import { Rating } from "../src/fsrs.js";
 import { nowSec } from "../src/ids.js";
 
@@ -65,6 +65,7 @@ test("daily new limit tapers as cards are studied today", () => {
 
 test("answering buries siblings; new-day unbury restores them", () => {
   const col = collectionWithDeck();
+  col.dconf["1"].new.bury = true; // burying is off by default (Anki parity)
   const mid = Object.values(col.models).find((m) => m.name === "Basic").id;
   const note = new Note({ mid, fields: ["Q", "A"] }).normalize();
   col.addNote(note);
@@ -166,4 +167,82 @@ test("subdeck cards are included when studying the parent", () => {
   const sched = new Scheduler(col);
   assert.equal(sched.counts(1).new, 1); // child card counted under parent
   assert.equal(sched.counts(2).new, 1); // and under the child itself
+});
+
+test("early review (filtered deck, odue in future) uses penalized no-fuzz formulas", () => {
+  const col = collectionWithDeck();
+  const sched = new Scheduler(col);
+  // Review card pulled into a filtered deck 5 days early (odue = home due).
+  const card = addCard(col, {
+    type: CardType.Review, queue: CardQueue.Review,
+    due: sched.daysElapsed, ivl: 20, factor: 2500,
+  });
+  card.odid = 1;
+  card.odue = sched.daysElapsed + 5;
+  const s = new Scheduler(col).nextStates(card);
+  // elapsed = 20 − 5 = 15 < scheduled 20 → early branch (rslib review.rs):
+  // hard = max(15×1.2, 20×1.2/2) = 18; good = max(15×2.5, 20) = 37.5 → 38;
+  // easy = 37.5 × (1.3 − 0.3/2) = 43.125 → 43.
+  assert.equal(s.hard.state.scheduledDays, 18);
+  assert.equal(s.good.state.scheduledDays, 38);
+  assert.equal(s.easy.state.scheduledDays, 43);
+});
+
+test("load balancer avoids loaded days within the fuzz range", () => {
+  const col = collectionWithDeck();
+  const sched = new Scheduler(col, { fuzz: true });
+  // Pile 10 reviews onto candidate day 4; leave days 3 and 5 empty.
+  for (let i = 0; i < 10; i++) {
+    addCard(col, { type: CardType.Review, queue: CardQueue.Review, due: sched.daysElapsed + 4, ivl: 5 });
+  }
+  const card = addCard(col, { type: CardType.Review, queue: CardQueue.Review, due: sched.daysElapsed, ivl: 5 });
+  // interval 4 → fuzz bounds [3, 5]; day 4 is loaded, so picks should avoid it.
+  assert.equal(sched._balancedInterval(4, 1, 36500, card, 0.1), 3);
+  assert.equal(sched._balancedInterval(4, 1, 36500, card, 0.9), 5);
+  // Long intervals skip the balancer (plain fuzz fallback).
+  assert.equal(sched._balancedInterval(100, 1, 36500, card, 0.5), null);
+});
+
+test("load balancer honors easy-days (minimum weekday gets ~zero weight)", () => {
+  const col = collectionWithDeck();
+  const sched = new Scheduler(col, { fuzz: true });
+  // 2 cards on day 3, 10 on day 4, 2 on day 5 — then make day 5's weekday "minimum".
+  for (let i = 0; i < 2; i++) addCard(col, { type: CardType.Review, queue: CardQueue.Review, due: sched.daysElapsed + 3, ivl: 5 });
+  for (let i = 0; i < 10; i++) addCard(col, { type: CardType.Review, queue: CardQueue.Review, due: sched.daysElapsed + 4, ivl: 5 });
+  for (let i = 0; i < 2; i++) addCard(col, { type: CardType.Review, queue: CardQueue.Review, due: sched.daysElapsed + 5, ivl: 5 });
+  const ed = [1, 1, 1, 1, 1, 1, 1];
+  ed[sched._weekdayOf(5)] = 0; // minimum
+  col.dconf["1"].easyDays = ed;
+  const card = addCard(col, { type: CardType.Review, queue: CardQueue.Review, due: sched.daysElapsed, ivl: 5 });
+  // Day 3 (light, normal) should win for most of the unit interval.
+  assert.equal(sched._balancedInterval(4, 1, 36500, card, 0.9), 3);
+});
+
+test("FSRS: memory state is derived from revlog replay for stateless cards", () => {
+  const col = collectionWithDeck();
+  col.conf.fsrs = true;
+  const sched = new Scheduler(col);
+  const day = 86400000;
+  const nowMs = sched.now * 1000;
+  const card = addCard(col, {
+    type: CardType.Review, queue: CardQueue.Review, due: sched.daysElapsed, ivl: 10, factor: 2500,
+  });
+  // A complete history: learning entries then two reviews.
+  col.revlog.push(
+    new Revlog({ id: nowMs - 20 * day, cid: card.id, ease: 1, ivl: -60, factor: 0, type: RevlogType.Learn }),
+    new Revlog({ id: nowMs - 19 * day, cid: card.id, ease: 3, ivl: 1, factor: 2500, type: RevlogType.Learn }),
+    new Revlog({ id: nowMs - 15 * day, cid: card.id, ease: 3, ivl: 4, factor: 2500, type: RevlogType.Review }),
+    new Revlog({ id: nowMs - 10 * day, cid: card.id, ease: 4, ivl: 10, factor: 2650, type: RevlogType.Review }),
+  );
+  const withHistory = new Scheduler(col).nextStates(card).good.state.memoryState;
+  assert.ok(withHistory, "memory state derived from revlog");
+  assert.ok(withHistory.stability > 0 && withHistory.difficulty >= 1 && withHistory.difficulty <= 10);
+
+  // A card with no revlog at all falls back to the SM-2 approximation.
+  const bare = addCard(col, {
+    type: CardType.Review, queue: CardQueue.Review, due: sched.daysElapsed, ivl: 10, factor: 2500,
+  });
+  const approx = new Scheduler(col).nextStates(bare).good.state.memoryState;
+  assert.ok(approx, "SM-2 fallback state");
+  assert.notEqual(approx.stability, withHistory.stability); // replay ≠ approximation
 });

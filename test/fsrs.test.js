@@ -89,3 +89,36 @@ test("difficulty stays within [1,10] and stability within clamps", () => {
     assert.ok(state.stability >= 0.001 && state.stability <= 36500);
   }
 });
+
+// Golden vectors from fsrs-rs inference.rs test_memory_from_sm2 (f32 oracle;
+// we compute in f64, hence the looser-but-tight tolerance).
+test("memoryStateFromSm2 matches fsrs-rs golden vectors", () => {
+  const fsrs = new FSRS(DEFAULT_PARAMETERS);
+  const approx = (a, b) => Math.abs(a - b) < 0.001;
+  let m = fsrs.memoryStateFromSm2(2.5, 10, 0.9);
+  assert.ok(approx(m.stability, 10.0) && approx(m.difficulty, 6.9140563), JSON.stringify(m));
+  m = fsrs.memoryStateFromSm2(2.5, 10, 0.8);
+  assert.ok(approx(m.stability, 3.01572) && approx(m.difficulty, 9.393428), JSON.stringify(m));
+  m = fsrs.memoryStateFromSm2(2.5, 10, 0.95);
+  assert.ok(approx(m.stability, 24.841097) && approx(m.difficulty, 1.2974405), JSON.stringify(m));
+  m = fsrs.memoryStateFromSm2(1.3, 20, 0.9);
+  assert.ok(approx(m.stability, 20.0) && approx(m.difficulty, 10.0), JSON.stringify(m));
+
+  // Consistency: a Good after waiting `interval` days from the converted
+  // state should grow stability by ≈ the SM-2 ease factor (fsrs-rs does the
+  // same check with < 0.01 relative tolerance).
+  const interval = 15, ease = 2.0;
+  const grown = fsrs.nextState(fsrs.memoryStateFromSm2(ease, interval, 0.9), interval, Rating.Good).stability;
+  assert.ok(Math.abs(grown / interval - ease) < 0.01, `factor ${grown / interval}`);
+});
+
+// fsrs-rs test_memory_state vector (DEFAULT_PARAMETERS): replaying
+// ratings [1,3,3,3,3,3] with day gaps [0,0,1,3,8,21] yields this state.
+test("forwardReviews replays a full history (fsrs-rs golden vector)", () => {
+  const fsrs = new FSRS(DEFAULT_PARAMETERS);
+  const ratings = [1, 3, 3, 3, 3, 3];
+  const deltas = [0, 0, 1, 3, 8, 21];
+  const state = fsrs.forwardReviews(ratings.map((rating, i) => ({ rating, deltaT: deltas[i] })));
+  assert.ok(Math.abs(state.stability - 53.62691) < 0.01, `stability ${state.stability}`);
+  assert.ok(Math.abs(state.difficulty - 6.3574867) < 0.01, `difficulty ${state.difficulty}`);
+});

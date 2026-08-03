@@ -271,11 +271,13 @@ export function defaultDeck(id = 1, name = "Default") {
 }
 
 export function defaultDeckConfig(id = 1, name = "Default") {
+  // Defaults match current Anki (rslib deckconfig/mod.rs): burying off,
+  // 200 reviews/day, leeches tagged but not suspended.
   return {
     id, name, autoplay: true, maxTaken: 60, mod: 0, replayq: true, timer: 0, usn: -1,
-    new: { bury: true, delays: [1, 10], initialFactor: 2500, ints: [1, 4, 7], order: 1, perDay: 20, separate: true },
-    rev: { bury: true, ease4: 1.3, fuzz: 0.05, ivlFct: 1, maxIvl: 36500, minSpace: 1, perDay: 100 },
-    lapse: { delays: [10], leechAction: 0, leechFails: 8, minInt: 1, mult: 0 },
+    new: { bury: false, delays: [1, 10], initialFactor: 2500, ints: [1, 4, 7], order: 1, perDay: 20, separate: true },
+    rev: { bury: false, ease4: 1.3, fuzz: 0.05, ivlFct: 1, maxIvl: 36500, minSpace: 1, perDay: 200 },
+    lapse: { delays: [10], leechAction: 1, leechFails: 8, minInt: 1, mult: 0 },
   };
 }
 

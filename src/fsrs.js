@@ -118,6 +118,49 @@ export class FSRS {
     return (stability / factor) * (Math.pow(retention, 1.0 / decay) - 1.0);
   }
 
+  /**
+   * Replay a review history into a memory state (fsrs-rs forward_reviews).
+   * reviews: [{ rating, deltaT }] in chronological order (first deltaT 0).
+   * startingState seeds the replay for truncated histories; when null the
+   * first review initializes the state from its rating.
+   */
+  forwardReviews(reviews, startingState = null) {
+    let state, start;
+    if (startingState) {
+      state = startingState;
+      start = 0;
+    } else if (!reviews.length) {
+      return { stability: 0, difficulty: 0 };
+    } else {
+      const r = Math.min(Math.max(reviews[0].rating, 1), 4);
+      state = {
+        stability: clamp(this.initStability(r), S_MIN, S_MAX),
+        difficulty: clamp(this.initDifficulty(r), D_MIN, D_MAX),
+      };
+      start = 1;
+    }
+    for (let i = start; i < reviews.length; i++) {
+      state = this.nextState(state, reviews[i].deltaT, reviews[i].rating);
+    }
+    return state;
+  }
+
+  /**
+   * Approximate an FSRS memory state from SM-2 ease + interval, for cards
+   * with no FSRS state (imported Anki cards with SM-2 history). Port of
+   * fsrs-rs memory_state_from_sm2 (inference.rs). sm2Retention is the recall
+   * rate the SM-2 interval is assumed to have targeted; Anki derives it from
+   * revlog history and falls back to 0.9 when there's none.
+   */
+  memoryStateFromSm2(easeFactor, interval, sm2Retention = 0.9) {
+    const { decay, factor } = this._curve();
+    const w = this.w;
+    const stability = Math.max(interval, 0.001) * factor / (Math.pow(sm2Retention, 1.0 / decay) - 1.0);
+    const difficulty = 11.0 - (easeFactor - 1.0)
+      / (Math.exp(w[8]) * Math.pow(stability, -w[9]) * Math.expm1((1.0 - sm2Retention) * w[10]));
+    return { stability, difficulty: Math.min(Math.max(difficulty, 1), 10) };
+  }
+
   // --- Initial state (first review of a brand-new card) ---
 
   /** S₀ for a first rating: w[rating-1]. @param {number} rating */

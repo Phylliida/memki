@@ -121,7 +121,7 @@ const utf8 = new TextDecoder();
 /**
  * Decode one protobuf message into Map<fieldNo, values[]>: varints as numbers,
  * length-delimited fields as Uint8Array (caller decides string vs submessage);
- * fixed32/64 are skipped (nothing we read uses them).
+ * fixed32/fixed64 as f32/f64 numbers (deck_config floats need them).
  */
 function pbFields(bytes) {
   const fields = new Map();
@@ -143,9 +143,13 @@ function pbFields(bytes) {
     const wire = tag & 7;
     let val;
     if (wire === 0) val = Number(varint());
-    else if (wire === 1) { i += 8; continue; }
-    else if (wire === 5) { i += 4; continue; }
-    else if (wire === 2) {
+    else if (wire === 1) {
+      val = new DataView(bytes.buffer, bytes.byteOffset + i, 8).getFloat64(0, true);
+      i += 8;
+    } else if (wire === 5) {
+      val = new DataView(bytes.buffer, bytes.byteOffset + i, 4).getFloat32(0, true);
+      i += 4;
+    } else if (wire === 2) {
       const len = Number(varint());
       val = bytes.subarray(i, i + len);
       i += len;
@@ -164,6 +168,22 @@ const pbInt = (f, no, dflt = 0) => {
   const v = f.get(no)?.[0];
   return typeof v === "number" ? v : dflt;
 };
+/** Scalar float field (fixed32/64), or dflt when absent. */
+const pbFloat = (f, no, dflt = 0) => {
+  const v = f.get(no)?.[0];
+  return typeof v === "number" ? v : dflt;
+};
+/** Packed repeated float field (length-delimited LE f32s). */
+function pbFloats(f, no) {
+  const out = [];
+  for (const v of f.get(no) ?? []) {
+    if (v instanceof Uint8Array) {
+      const dv = new DataView(v.buffer, v.byteOffset, v.byteLength);
+      for (let i = 0; i + 4 <= v.byteLength; i += 4) out.push(dv.getFloat32(i, true));
+    } else if (typeof v === "number") out.push(v); // unpacked form
+  }
+  return out;
+}
 
 /** True if the open database contains a table with this name. */
 const hasTable = (db, name) =>
@@ -206,10 +226,10 @@ function readModernTables(db, col) {
     };
   }
 
-  // Deck options: keep our defaults per group (the protobuf holds scheduling
-  // knobs we don't map yet); decks reference groups by id below.
-  for (const [id, name, mtime] of rows(db, "select id, name, mtime_secs from deck_config")) {
-    col.dconf[String(id)] = { ...defaultDeckConfig(id, name), mod: mtime };
+  // Deck options: map the modern per-group protobuf (steps, limits, bury
+  // flags, order options, FSRS params/retention...) onto our dconf shape.
+  for (const [id, name, mtime, config] of rows(db, "select id, name, mtime_secs, config from deck_config")) {
+    col.dconf[String(id)] = deckConfigFromProto(id, name, mtime, config);
   }
   if (!col.dconf["1"]) col.dconf["1"] = defaultDeckConfig(1, "Default");
 
@@ -230,6 +250,57 @@ function readModernTables(db, col) {
     const parsed = parseJsonOr(typeof val === "string" ? val : utf8.decode(val), undefined);
     if (parsed !== undefined) col.conf[key] = parsed;
   }
+}
+
+/**
+ * Map a modern deck_config protobuf (proto/anki/deck_config.proto) onto our
+ * legacy-shaped dconf JSON. Modern-only knobs get extra JSON keys (they
+ * round-trip harmlessly through our v11 export).
+ */
+function deckConfigFromProto(id, name, mtime, blob) {
+  const dc = defaultDeckConfig(id, name);
+  dc.mod = mtime;
+  const c = pbFields(blob ?? new Uint8Array());
+  const has = (n) => c.has(n);
+
+  const learnSteps = pbFloats(c, 1);
+  if (learnSteps.length) dc.new.delays = learnSteps;
+  const relearnSteps = pbFloats(c, 2);
+  if (relearnSteps.length) dc.lapse.delays = relearnSteps;
+  const fsrs6 = pbFloats(c, 6);
+  if (fsrs6.length) dc.fsrsParams6 = fsrs6;
+  else { const fsrs5 = pbFloats(c, 5); if (fsrs5.length) dc.fsrsParams6 = fsrs5; }
+  const easyDays = pbFloats(c, 4);
+  if (easyDays.length === 7) dc.easyDays = easyDays;
+
+  if (has(9)) dc.new.perDay = pbInt(c, 9);
+  if (has(10)) dc.rev.perDay = pbInt(c, 10);
+  if (has(11) && pbFloat(c, 11) > 0) dc.new.initialFactor = Math.round(pbFloat(c, 11) * 1000);
+  if (has(12)) dc.rev.ease4 = pbFloat(c, 12);
+  if (has(13)) dc.rev.hardFactor = pbFloat(c, 13);
+  if (has(14)) dc.lapse.mult = pbFloat(c, 14);
+  if (has(15)) dc.rev.ivlFct = pbFloat(c, 15);
+  if (has(16)) dc.rev.maxIvl = pbInt(c, 16);
+  if (has(17)) dc.lapse.minInt = pbInt(c, 17);
+  if (has(18) && pbInt(c, 18) > 0) dc.new.ints[0] = pbInt(c, 18);
+  if (has(19) && pbInt(c, 19) > 0) dc.new.ints[1] = pbInt(c, 19);
+  if (has(20)) dc.new.order = pbInt(c, 20) === 1 ? 0 : 1; // proto DUE=0/RANDOM=1 vs legacy DUE=1/RANDOM=0
+  if (has(21)) dc.lapse.leechAction = pbInt(c, 21); // SUSPEND=0/TAG_ONLY=1, same as legacy
+  if (has(22)) dc.lapse.leechFails = pbInt(c, 22);
+  if (has(23)) dc.autoplay = !pbInt(c, 23);
+  if (has(24)) dc.maxTaken = pbInt(c, 24);
+  if (has(25)) dc.timer = pbInt(c, 25) ? 1 : 0;
+  if (has(27)) dc.new.bury = !!pbInt(c, 27);
+  if (has(28)) dc.rev.bury = !!pbInt(c, 28);
+  if (has(29)) dc.buryInterday = !!pbInt(c, 29);
+  if (has(30)) dc.newMix = pbInt(c, 30);        // 0 mix / 1 after / 2 before
+  if (has(31)) dc.interdayMix = pbInt(c, 31);   // day-learning vs reviews, same enum
+  if (has(32)) dc.newSortOrder = pbInt(c, 32);
+  if (has(33)) dc.reviewOrder = pbInt(c, 33);
+  if (has(34)) dc.newGatherPriority = pbInt(c, 34);
+  if (has(37)) dc.desiredRetention = pbFloat(c, 37);
+  if (has(40)) dc.historicalRetention = pbFloat(c, 40);
+  return dc;
 }
 
 /** Build a Collection from an open sql.js database. */

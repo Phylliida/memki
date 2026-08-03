@@ -230,6 +230,13 @@ a.hint { display: inline-block; color: var(--accent); }
 .nt-tmpl { border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .nt-tmpl-head { display: flex; gap: 8px; align-items: center; }
 .nt-tmpl-head input { flex: 1; font-weight: 600; }
+
+/* Easy-days picker (deck options): normal = plain, reduced = accent outline,
+   minimum = dimmed. */
+.easy-days { display: flex; gap: 6px; flex-wrap: wrap; }
+.easy-day { padding: 6px 12px; font-size: 13px; }
+.easy-day.ed-reduced { border-color: var(--accent); color: var(--accent); }
+.easy-day.ed-minimum { opacity: 0.4; }
 .form label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
 /* Field rows around the markdown editor. NOT a <label>: clicking inside a
    label activates its first labelable control — which would be the first

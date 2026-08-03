@@ -85,6 +85,7 @@ test("newSpread orders new cards first / last / mixed", () => {
 test("reaching the leech threshold tags the note and suspends", () => {
   const col = collectionWithDeck();
   col.dconf["1"].lapse.leechFails = 2;
+  col.dconf["1"].lapse.leechAction = 0; // suspend (Anki default is tag-only)
   const card = addCard(col, { type: CardType.Review, queue: CardQueue.Review, due: 0, ivl: 10, factor: 2500, lapses: 1 });
   const sched = new Scheduler(col);
   sched.answerCard(card, Rating.Again); // second lapse → leech

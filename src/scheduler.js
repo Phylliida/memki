@@ -14,11 +14,9 @@
 //
 // Deferred vs. Anki (documented, not silently dropped): interval fuzz is OFF by
 // default (deterministic, matching rslib's fuzz_factor=None test path); filtered
-// deck preview mode + custom ordering, FSRS load balancing, easy days, the v3
-// gather/sort order options (we gather by position/due date and put interday
-// learning before reviews rather than mixed), auto-advance, and the a*1000
-// "reps left today" component of `left` are not yet implemented.
-
+// deck preview mode + custom ordering, easy days UI (the load balancer honors
+// imported easy-days settings), and the a*1000 "reps left today" component of
+// `left` are not yet implemented.
 import { CardType, CardQueue, RevlogType, Revlog, cardFlagSet, writeCardFlags } from "./model.js";
 import { FSRS, DEFAULT_PARAMETERS } from "./fsrs.js";
 import { nowMs, nowSec } from "./ids.js";
@@ -139,13 +137,76 @@ function withReviewFuzz(ctx, interval, minimum, maximum) {
   if (ctx.fuzzFactor == null) {
     return Math.min(Math.max(Math.round(interval), minimum), maximum);
   }
+  // Load balancer (when enabled) replaces the blind fuzz pick.
+  if (ctx.loadBalancePick) {
+    const picked = ctx.loadBalancePick(interval, minimum, maximum);
+    if (picked != null) return picked;
+  }
   const [lower, upper] = constrainedFuzzBounds(interval, minimum, maximum);
   return Math.floor(lower + ctx.fuzzFactor * (1 + upper - lower));
+}
+
+// --- Load balancer (port of rslib states/load_balancer.rs) ---
+// Instead of picking uniformly within the fuzz range, days are weighted by
+// existing load: weight = (1/cards_due)^2.15 × (1/interval)^3 × sibling
+// modifier × easy-days modifier; a day with no due cards gets weight 1.0.
+
+const MAX_LOAD_BALANCE_INTERVAL = 90;
+const LOAD_BALANCE_DAYS = 99; // 90 × 1.1, like rslib
+const SIBLING_STEPS = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5];
+const SIBLING_RANGE = [1.0, 0.8, 0.6, 0.4, 0.2, 0.000001, 0.2, 0.4, 0.6, 0.8, 1.0];
+
+/** Easy-day load modifier per weekday percentage: 1.0 normal, 0.0 minimum, else reduced. */
+function easyDayLoadModifier(p) {
+  return p === 1.0 ? 1.0 : p === 0.0 ? 0.0001 : 0.5;
+}
+
+/** Per-candidate-day on/off weights from easy-day settings (load_balancer.rs). */
+function easyDayModifiers(easyPercents, weekdays, reviewCounts) {
+  const percents = easyPercents?.length === 7 ? easyPercents : [1, 1, 1, 1, 1, 1, 1];
+  const total = reviewCounts.reduce((a, b) => a + b, 0);
+  const totalPercents = weekdays.reduce((a, w) => a + easyDayLoadModifier(percents[w]), 0);
+  return weekdays.map((w, i) => {
+    const p = percents[w];
+    if (p !== 1.0 && p !== 0.0) {
+      // Reduced: only allowed when this day isn't above the reduced threshold.
+      const threshold = (total - reviewCounts[i]) / (totalPercents - 0.5);
+      return reviewCounts[i] / 0.5 > threshold ? 0.0001 : 1.0;
+    }
+    return easyDayLoadModifier(p);
+  });
+}
+
+/** Sibling-dispersal weights: days near an existing sibling get downweighted. */
+function siblingModifiers(byPreset, before, after, nid) {
+  const mods = new Array(after - before + 1).fill(1.0);
+  if (nid == null) return mods;
+  const siblingDays = new Set();
+  for (const days of byPreset.values()) {
+    days.forEach((day, i) => { if (day.notes.has(nid)) siblingDays.add(i); });
+  }
+  for (const sd of siblingDays) {
+    for (let k = 0; k < SIBLING_STEPS.length; k++) {
+      const t = sd + SIBLING_STEPS[k] - before;
+      if (t >= 0 && t < mods.length) mods[t] *= SIBLING_RANGE[k];
+    }
+  }
+  return mods;
 }
 
 /** Deterministic fuzz factor in [0,1) from a card's id + reps. */
 function fuzzFactorFor(card) {
   let x = ((Number(card.id) >>> 0) ^ ((card.reps * 2654435761) >>> 0)) >>> 0;
+  x = ((x ^ (x >>> 15)) * 2246822519) >>> 0;
+  x = ((x ^ (x >>> 13)) * 3266489917) >>> 0;
+  x = (x ^ (x >>> 16)) >>> 0;
+  return x / 4294967296;
+}
+
+/** Deterministic ordering hash in [0,1), salted by day (Anki salts with
+ *  days_elapsed, so "random" orders are stable within a day). */
+function orderHash(id, salt) {
+  let x = ((Number(id) >>> 0) ^ ((salt * 2654435761) >>> 0)) >>> 0;
   x = ((x ^ (x >>> 15)) * 2246822519) >>> 0;
   x = ((x ^ (x >>> 13)) * 3266489917) >>> 0;
   x = (x ^ (x >>> 16)) >>> 0;
@@ -176,7 +237,20 @@ function passingReviewIntervals(r, ctx) {
   }
   // non-early (common) path
   const current = Math.max(r.scheduledDays, 1);
-  const daysLate = Math.max(r.elapsedDays - r.scheduledDays, 0);
+  if (r.elapsedDays < r.scheduledDays) {
+    // Early review (filtered deck / review-ahead): penalized formulas, no
+    // fuzz (rslib review.rs passing_early_review_intervals).
+    const early = (v) => {
+      const max = Math.max(ctx.maximumReviewInterval, 1);
+      return Math.min(Math.max(Math.round(v * ctx.intervalMultiplier), 0), max);
+    };
+    const hard = early(Math.max(r.elapsedDays * ctx.hardMultiplier, (current * ctx.hardMultiplier) / 2));
+    const good = early(Math.max(r.elapsedDays * r.easeFactor, current));
+    const reducedBonus = ctx.easyMultiplier - (ctx.easyMultiplier - 1) / 2;
+    const easy = early(Math.max(r.elapsedDays * r.easeFactor, current) * reducedBonus);
+    return [hard, good, easy];
+  }
+  const daysLate = r.elapsedDays - r.scheduledDays;
   const hardFactor = ctx.hardMultiplier;
   const hardMin = hardFactor <= 1 ? 0 : r.scheduledDays + 1;
   const hard = constrainPassing(ctx, current * hardFactor, hardMin);
@@ -187,7 +261,8 @@ function passingReviewIntervals(r, ctx) {
 }
 
 function failingReviewInterval(r, ctx) {
-  if (ctx.fsrs) return [ctx.fsrs.again.interval, fsrsMem(ctx.fsrs.again)];
+  // Anki defers fuzz on the FSRS lapse path, but the max-ivl cap still applies.
+  if (ctx.fsrs) return [Math.min(ctx.fsrs.again.interval, Math.max(ctx.maximumReviewInterval, 1)), fsrsMem(ctx.fsrs.again)];
   const [min, max] = minMax(ctx, ctx.minimumLapseInterval);
   const interval = withReviewFuzz(ctx, Math.max(r.scheduledDays, 1) * ctx.lapseMultiplier, min, max);
   return [interval, null];
@@ -410,6 +485,8 @@ export class Scheduler {
     const timing = collectionTiming(collection, this.now);
     this.daysElapsed = timing.daysElapsed;
     this.secsUntilRollover = timing.secsUntilRollover;
+    this.nextDayAt = timing.nextDayAt;
+    this._lbData = null; // load-balance cache, built on first use
   }
 
   /** Resolve the deck options group (dconf) for a card's deck. */
@@ -419,6 +496,172 @@ export class Scheduler {
     if (deck?.dyn && card.odid) deck = this.col.decks[String(card.odid)] ?? deck;
     const dcId = deck && deck.conf != null ? String(deck.conf) : "1";
     return this.col.dconf[dcId] ?? this.col.dconf["1"] ?? {};
+  }
+
+  /**
+   * FSRS memory state for a card that lacks one (Anki fsrs/memory_state.rs):
+   * replay the card's revlog through FSRS; seed with the SM-2 approximation
+   * when the history is truncated; plain SM-2 approximation when there's no
+   * usable history; null for new cards.
+   */
+  _memoryStateFor(card, fsrs) {
+    const entries = this.col.revlog.filter((e) => e.cid === card.id).sort((a, b) => a.id - b.id);
+    const item = this._fsrsItemFor(entries, fsrs);
+    if (item) return fsrs.forwardReviews(item.reviews, item.startingState);
+    if (card.type !== CardType.New && card.ivl > 0) {
+      return fsrs.memoryStateFromSm2((card.factor || 2500) / 1000, card.ivl);
+    }
+    return null;
+  }
+
+  /**
+   * Build { reviews, startingState } from a card's revlog (params.rs
+   * reviews_for_fsrs + memory_state.rs fsrs_item_for_memory_state,
+   * non-training path). reviews are [{ rating, deltaT }] chronological.
+   */
+  _fsrsItemFor(entries, fsrs) {
+    const isCramming = (e) => e.type === RevlogType.Filtered && e.factor === 0;
+    const isReset = (e) => e.type === RevlogType.Manual && e.factor === 0;
+    let firstOfLastLearn = null, firstUserGrade = null, complete = false;
+    // Working backwards from the latest review…
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i];
+      if (isCramming(e)) continue;
+      const userGraded = e.ease > 0;
+      const interday = e.ivl >= 1 || e.ivl <= -DAY; // day-based interval ≥ 1d
+      if (userGraded && interday) firstUserGrade = i;
+      if (userGraded && e.type === RevlogType.Learn) {
+        firstOfLastLearn = i;
+        complete = true;
+      } else if (isReset(e)) {
+        if (firstOfLastLearn !== null) { complete = true; break; }
+        if (firstUserGrade !== null) { complete = false; break; }
+        return null; // reset with no graded review after it
+      } else if (firstOfLastLearn !== null) break;
+    }
+    if (firstOfLastLearn !== null) entries = entries.slice(firstOfLastLearn);
+    else if (firstUserGrade !== null) entries = entries.slice(firstUserGrade);
+    else return null;
+    entries = entries.filter((e) => e.ease > 0 && !isCramming(e));
+    if (!entries.length) return null;
+
+    // delta_t in whole days between consecutive entries, measured back from
+    // the next day boundary (revlog/mod.rs days_elapsed).
+    const daysAgo = (e) => Math.max(Math.floor((this.nextDayAt - e.id / 1000) / DAY), 0);
+    const reviews = entries.map((e, i) => ({
+      rating: e.ease,
+      deltaT: i === 0 ? 0 : daysAgo(entries[i - 1]) - daysAgo(e),
+    }));
+    if (complete) return { reviews, startingState: null };
+    // Truncated history: seed from the first entry via the SM-2 approximation.
+    const first = entries[0];
+    const ease = (first.factor === 0 ? 2500 : first.factor) / 1000;
+    const startingState = fsrs.memoryStateFromSm2(ease, Math.max(first.ivl, 1));
+    // Ease ≤ 1.1 marks an FSRS-generated entry — reinterpret it as difficulty.
+    if (ease <= 1.1) startingState.difficulty = (ease - 0.1) * 9 + 1;
+    return { reviews: reviews.slice(1), startingState };
+  }
+
+  /** The dconf id for a card's deck (load balancer groups by preset). */
+  _deckConfigIdFor(card) {
+    let deck = this.col.decks[String(card.did)];
+    if (deck?.dyn && card.odid) deck = this.col.decks[String(card.odid)] ?? deck;
+    return deck && deck.conf != null ? String(deck.conf) : "1";
+  }
+
+  // --- Load balancer (Scheduler-side plumbing) ---
+
+  /** Due-load per day per preset for the next LOAD_BALANCE_DAYS days. */
+  _buildLoadBalance() {
+    const byPreset = new Map(); // dcid -> [{cards:Set, notes:Set} × LOAD_BALANCE_DAYS]
+    const easyDays = new Map();
+    for (const [id, dc] of Object.entries(this.col.dconf)) easyDays.set(id, dc.easyDays);
+    for (const card of this.col.cards.values()) {
+      if (card.queue !== CardQueue.Review && card.queue !== CardQueue.DayLearning) continue;
+      const t = card.due - this.daysElapsed;
+      if (t < 0 || t >= LOAD_BALANCE_DAYS) continue;
+      const dcid = this._deckConfigIdFor(card);
+      let days = byPreset.get(dcid);
+      if (!days) {
+        days = Array.from({ length: LOAD_BALANCE_DAYS }, () => ({ cards: new Set(), notes: new Set() }));
+        byPreset.set(dcid, days);
+      }
+      days[t].cards.add(card.id);
+      days[t].notes.add(card.nid);
+    }
+    return { byPreset, easyDays };
+  }
+
+  _lb() {
+    if (!this._lbData) this._lbData = this._buildLoadBalance();
+    return this._lbData;
+  }
+
+  /** Weekday (Monday=0) of the day `offset` days from today (load_balancer.rs). */
+  _weekdayOf(offset) {
+    const d = new Date((this.nextDayAt + (offset - 1) * DAY) * 1000);
+    return (d.getDay() + 6) % 7;
+  }
+
+  /**
+   * Load-weighted day pick within the fuzz bounds, or null to fall back to
+   * plain fuzz (long intervals, or no due load for this preset).
+   */
+  _balancedInterval(interval, minimum, maximum, card, fuzzFactor) {
+    if (interval > MAX_LOAD_BALANCE_INTERVAL || minimum > MAX_LOAD_BALANCE_INTERVAL) return null;
+    const [before, after] = constrainedFuzzBounds(interval, minimum, maximum);
+    const data = this._lb();
+    const dcid = this._deckConfigIdFor(card);
+    const days = data.byPreset.get(dcid);
+    if (!days) return null;
+
+    const counts = [], weekdays = [];
+    for (let t = before; t <= after; t++) {
+      counts.push(days[t]?.cards.size ?? 0);
+      weekdays.push(this._weekdayOf(t));
+    }
+    const easy = easyDayModifiers(data.easyDays.get(dcid), weekdays, counts);
+    const sib = siblingModifiers(data.byPreset, before, after, card.nid);
+
+    let total = 0;
+    const weights = [];
+    for (let i = 0; i < counts.length; i++) {
+      const t = before + i;
+      const w = counts[i] === 0 ? 1.0
+        : Math.pow(1 / counts[i], 2.15) * Math.pow(1 / t, 3) * sib[i] * easy[i];
+      weights.push(w);
+      total += w;
+    }
+    let r = fuzzFactor * total;
+    for (let i = 0; i < weights.length; i++) {
+      r -= weights[i];
+      if (r <= 0) return before + i;
+    }
+    return after;
+  }
+
+  /** Keep the load cache in step after an answer moves a card's due day. */
+  _loadBalanceUpdate(card) {
+    if (!this._lbData) return; // only maintain if built
+    for (const days of this._lbData.byPreset.values()) {
+      for (const day of days) {
+        if (day.cards.delete(card.id)) {
+          if (![...day.cards].some((cid) => this.col.cards.get(cid)?.nid === card.nid)) {
+            day.notes.delete(card.nid);
+          }
+        }
+      }
+    }
+    if (card.queue === CardQueue.Review || card.queue === CardQueue.DayLearning) {
+      const t = card.due - this.daysElapsed;
+      if (t >= 0 && t < LOAD_BALANCE_DAYS) {
+        const days = this._lbData.byPreset.get(this._deckConfigIdFor(card));
+        if (days) {
+          days[t].cards.add(card.id);
+          days[t].notes.add(card.nid);
+        }
+      }
+    }
   }
 
   desiredRetentionFor(dc) {
@@ -449,15 +692,29 @@ export class Scheduler {
       fsrs: null,
       fsrsShortTermWithSteps: false,
       fuzzFactor: this.fuzz ? fuzzFactorFor(card) : null,
+      // Load balancer (default on, like Anki): replaces the blind fuzz pick
+      // with a load-weighted day within the same fuzz bounds.
+      loadBalancePick: null,
     };
+    if (this.fuzz && this.col.conf?.loadBalancer !== false) {
+      const f = ctx.fuzzFactor;
+      ctx.loadBalancePick = (ivl, min, max) => this._balancedInterval(ivl, min, max, card, f);
+    }
 
     if (this.fsrsEnabled) {
       const fsrs = new FSRS(dc.fsrsParams6 ?? this.fsrsParameters, this.desiredRetentionFor(dc));
       const elapsed = current.kind === "review" ? current.elapsedDays
         : current.kind === "relearning" ? current.review.elapsedDays : 0;
-      const mem = current.kind === "review" ? current.memoryState
+      let mem = current.kind === "review" ? current.memoryState
         : current.kind === "relearning" ? current.review.memoryState
         : current.kind === "learning" ? current.memoryState : null;
+      if (mem == null && (current.kind === "review" || current.kind === "relearning")) {
+        // Cards with no FSRS state (e.g. imported SM-2 collections): derive
+        // one from the revlog like Anki (fsrs/memory_state.rs) — full replay
+        // when the history is complete, SM-2-seeded replay when truncated,
+        // plain SM-2 approximation when there's no usable history.
+        mem = this._memoryStateFor(card, fsrs);
+      }
       ctx.fsrs = fsrs.nextStates(mem, elapsed);
     }
     return ctx;
@@ -474,7 +731,10 @@ export class Scheduler {
       case CardType.Learning:
         return { kind: "learning", remainingSteps: remaining, scheduledSecs: 0, elapsedSecs: 0, memoryState };
       case CardType.Review: {
-        const due = Math.min(card.due, this.daysElapsed);
+        // In a filtered deck the state is computed from the home due (odue),
+        // which may be in the future — that's how early reviews are detected
+        // (rslib answering/current.rs). Normal decks clamp due to today.
+        const due = card.odid && card.odue ? card.odue : Math.min(card.due, this.daysElapsed);
         return {
           kind: "review", scheduledDays: card.ivl,
           elapsedDays: Math.max(card.ivl - (due - this.daysElapsed), 0),
@@ -539,25 +799,70 @@ export class Scheduler {
       }
     }
     const byDue = (a, b) => a.due - b.due;
-    learning.sort(byDue);
-    learningAhead.sort(byDue);
+    // Intraday learning: previously-answered cards first, then by due
+    // (rslib queue/learning.rs sorts by (reps == 0, due)).
+    const byLearningOrder = (a, b) => (a.reps === 0 ? 1 : 0) - (b.reps === 0 ? 1 : 0) || a.due - b.due;
+    learning.sort(byLearningOrder);
+    learningAhead.sort(byLearningOrder);
     dayLearning.sort(byDue);
-    review.sort(byDue);
-    newCards.sort(byDue);
+    // Gather order decides which cards the daily caps admit (Anki: ORDER BY
+    // at gather time), so apply it before capping, not after.
+    const orderDc = this.deckConfigFor({ did: deckId });
+    this._orderNewGather(newCards, orderDc);
+    this._orderReviewGather(review, orderDc);
+
+    // Gather-time sibling burying (v3, builder/burying.rs): after the first
+    // gathered sibling of a note, later siblings are excluded from the build
+    // when the corresponding bury flag is set. Modes OR-accumulate per note;
+    // learning cards record modes but are never excluded (no such flag).
+    const buryModes = new Map(); // nid -> { buryNew, buryRev }
+    const keepGathered = (card, kind) => {
+      const modes = buryModes.get(card.nid);
+      if (modes && ((kind === "new" && modes.buryNew) || (kind === "review" && modes.buryRev))) {
+        return false;
+      }
+      const dc = this.deckConfigFor(card);
+      buryModes.set(card.nid, {
+        buryNew: (modes?.buryNew ?? false) || (dc.new?.bury ?? false),
+        buryRev: (modes?.buryRev ?? false) || (dc.rev?.bury ?? false),
+      });
+      return true;
+    };
+    // Only new/review siblings are excludable by default; day-learning only
+    // when the modern bury_interday_learning flag is set.
+    const keep = (card) => keepGathered(card,
+      card.queue === CardQueue.New ? "new"
+        : card.queue === CardQueue.Review ? "review"
+        : card.queue === CardQueue.DayLearning && this.deckConfigFor(card).buryInterday ? "review" : null);
+    const gatheredLearning = learning.filter(keep);
+    const gatheredDayLearning = dayLearning.filter(keep);
+    const gatheredReview = review.filter(keep);
+    const gatheredNew = newCards.filter(keep);
 
     // Filtered decks ignore per-day limits and "studied today" counters.
-    let cappedDayLearn = dayLearning, cappedReview = review, cappedNew = newCards;
+    let cappedDayLearn = gatheredDayLearning, cappedReview = gatheredReview, cappedNew = gatheredNew;
     if (!this.col.decks[String(deckId)]?.dyn) {
       const budget = this._limitBudget(deckId);
-      cappedDayLearn = dayLearning.filter((c) => budget.take(c.did, "rev"));
-      cappedReview = review.filter((c) => budget.take(c.did, "rev"));
-      cappedNew = newCards.filter((c) => budget.take(c.did, "new"));
+      cappedDayLearn = gatheredDayLearning.filter((c) => budget.take(c.did, "rev"));
+      cappedReview = gatheredReview.filter((c) => budget.take(c.did, "rev"));
+      cappedNew = gatheredNew.filter((c) => budget.take(c.did, "new"));
     }
-    const learn = [...learning, ...cappedDayLearn];
+    this._sortNewDisplay(cappedNew, orderDc);
+
+    // Interday-learning vs reviews: 0 = interspersed (v3 default), 1 = after,
+    // 2 = before. New-card mix: dc.newMix overrides legacy conf.newSpread.
+    const interdayMix = orderDc.interdayMix ?? 0;
+    const dayAndReview = interdayMix === 2 ? [...cappedDayLearn, ...cappedReview]
+      : interdayMix === 1 ? [...cappedReview, ...cappedDayLearn]
+      : this._interleave(cappedReview, cappedDayLearn);
+    const newMix = orderDc.newMix ?? this.col.conf?.newSpread ?? 0;
+    const main = this._mixNewAndReview(dayAndReview, cappedNew, newMix);
     return {
-      learning: learn, review: cappedReview, new: cappedNew,
+      // Counts group day-learning with learning (Anki: learn_count includes
+      // interday learning); `all` applies the configured mix ordering.
+      learning: [...gatheredLearning, ...cappedDayLearn], review: cappedReview, new: cappedNew,
       // Learn-ahead cards are studied early only once everything else is done.
-      all: [...learn, ...this._mixNewAndReview(cappedReview, cappedNew), ...learningAhead],
+      all: [...gatheredLearning, ...main, ...learningAhead],
     };
   }
 
@@ -621,19 +926,84 @@ export class Scheduler {
     };
   }
 
-  /** Order reviews and new cards per conf.newSpread (0 mix, 1 last, 2 first). */
-  _mixNewAndReview(review, newCards) {
-    const spread = this.col.conf?.newSpread ?? 0;
+  /** Order reviews and new cards per mix mode (0 mix, 1 after, 2 before). */
+  _mixNewAndReview(review, newCards, spread) {
     if (spread === 2) return [...newCards, ...review];
     if (spread === 1 || !newCards.length || !review.length) return [...review, ...newCards];
+    return this._interleave(review, newCards);
+  }
+
+  /** Proportional interleave (Anki's intersperser). */
+  _interleave(a, b) {
     const out = [];
-    let ri = 0, ni = 0;
-    while (ri < review.length || ni < newCards.length) {
-      const rf = ri < review.length ? ri / review.length : Infinity;
-      const nf = ni < newCards.length ? ni / newCards.length : Infinity;
-      out.push(rf <= nf ? review[ri++] : newCards[ni++]);
+    let ai = 0, bi = 0;
+    while (ai < a.length || bi < b.length) {
+      const af = ai < a.length ? ai / a.length : Infinity;
+      const bf = bi < b.length ? bi / b.length : Infinity;
+      out.push(af <= bf ? a[ai++] : b[bi++]);
     }
     return out;
+  }
+
+  /** New-card gather order (v3 gather priority; legacy new.order=0 → random notes). */
+  _orderNewGather(newCards, dc) {
+    const prio = dc.newGatherPriority ?? (dc.new?.order === 0 ? 3 : 1);
+    if (prio === 1) { newCards.sort((a, b) => a.due - b.due); return; } // lowest position
+    const deckName = (c) => this.col.decks[String(c.did)]?.name ?? "";
+    const h = (x) => orderHash(x, this.daysElapsed);
+    if (prio === 2) newCards.sort((a, b) => b.due - a.due); // highest position
+    else if (prio === 3) newCards.sort((a, b) => h(a.nid) - h(b.nid) || a.due - b.due || a.ord - b.ord); // random notes (siblings consecutive)
+    else if (prio === 4) newCards.sort((a, b) => h(a.id) - h(b.id)); // random cards
+    else if (prio === 5) newCards.sort((a, b) => deckName(a).localeCompare(deckName(b)) || h(a.nid) - h(b.nid) || a.ord - b.ord);
+    else newCards.sort((a, b) => deckName(a).localeCompare(deckName(b)) || a.due - b.due || a.ord - b.ord); // 0: deck, then position
+  }
+
+  /** New-card display sort (applied after capping). */
+  _sortNewDisplay(cappedNew, dc) {
+    const order = dc.newSortOrder ?? 0;
+    if (order === 1) return; // no sort — keep gather order
+    const h = (x) => orderHash(x, this.daysElapsed);
+    if (order === 2) cappedNew.sort((a, b) => a.ord - b.ord || h(a.id) - h(b.id)); // template then random
+    else if (order === 3) cappedNew.sort((a, b) => h(a.nid) - h(b.nid) || a.ord - b.ord); // random note then template
+    else if (order === 4) cappedNew.sort((a, b) => h(a.id) - h(b.id)); // random card
+    else cappedNew.sort((a, b) => a.ord - b.ord); // 0: template (stable — gather order within an ordinal)
+  }
+
+  /** Review gather order (v3 review_order enum). */
+  _orderReviewGather(review, dc) {
+    const ro = dc.reviewOrder ?? 0;
+    if (ro === 0) { review.sort((a, b) => a.due - b.due); return; } // due day
+    const deckName = (c) => this.col.decks[String(c.did)]?.name ?? "";
+    const h = (x) => orderHash(x, this.daysElapsed);
+    const retr = (c) => this._retrievabilityForOrder(c);
+    const key = {
+      1: (a, b) => a.due - b.due || deckName(a).localeCompare(deckName(b)),        // day then deck
+      2: (a, b) => deckName(a).localeCompare(deckName(b)) || a.due - b.due,        // deck then day
+      3: (a, b) => a.ivl - b.ivl,                                                  // intervals ascending
+      4: (a, b) => b.ivl - a.ivl,                                                  // intervals descending
+      5: (a, b) => a.factor - b.factor,                                            // ease ascending
+      6: (a, b) => b.factor - a.factor,                                            // ease descending
+      7: (a, b) => retr(a) - retr(b),                                              // retrievability ascending
+      11: (a, b) => retr(b) - retr(a),                                             // retrievability descending
+      // relative overdueness: -(1 + (today−due+0.001)/ivl) asc → ratio desc
+      12: (a, b) => (this.daysElapsed - b.due + 0.001) / Math.max(b.ivl, 1) - (this.daysElapsed - a.due + 0.001) / Math.max(a.ivl, 1),
+      8: (a, b) => h(a.id) - h(b.id),                                              // random
+      9: (a, b) => a.id - b.id,                                                    // added
+      10: (a, b) => b.id - a.id,                                                   // reverse added
+    }[ro];
+    review.sort(key ?? ((a, b) => a.due - b.due));
+  }
+
+  /** Retrievability estimate for review ordering (FSRS curve, else SM-2 approx). */
+  _retrievabilityForOrder(card) {
+    const elapsed = Math.max(this.daysElapsed - card.due, 0) + Math.max(card.ivl, 0);
+    const s = card.memoryState?.stability;
+    if (s) {
+      const decay = -0.1542; // FSRS-6 default decay — an ordering key, not scheduling
+      const factor = Math.exp(Math.log(0.9) / decay) - 1;
+      return Math.pow((elapsed / s) * factor + 1, decay);
+    }
+    return Math.pow(0.9, elapsed / Math.max(card.ivl, 1));
   }
 
   /**
@@ -656,13 +1026,26 @@ export class Scheduler {
     return changed;
   }
 
-  /** Bury a card's siblings (same note) per the deck's bury settings. */
-  _burySiblings(card) {
+  /**
+   * Bury a card's siblings (same note) per the deck's bury settings. v3
+   * carve-out (rslib bury_and_suspend.rs): only siblings whose queue is
+   * gathered at or after the answered card's queue are buried — answering a
+   * review buries new siblings but never day-learning ones, etc.
+   * Rank order: intraday learning 0 < day-learning 1 < review 2 < new 3.
+   */
+  _burySiblings(card, answeredQueue) {
     const dc = this.deckConfigFor(card);
-    const buryNew = dc.new?.bury ?? true;
-    const buryRev = dc.rev?.bury ?? true;
+    const buryNew = dc.new?.bury ?? false;
+    const buryRev = dc.rev?.bury ?? false;
+    if (!buryNew && !buryRev) return;
+    const RANK = {
+      [CardQueue.Learning]: 0, [CardQueue.Preview]: 0,
+      [CardQueue.DayLearning]: 1, [CardQueue.Review]: 2, [CardQueue.New]: 3,
+    };
+    const answeredRank = RANK[answeredQueue] ?? 0;
     for (const sib of this.col.cards.values()) {
       if (sib.nid !== card.nid || sib.id === card.id) continue;
+      if ((RANK[sib.queue] ?? 99) < answeredRank) continue;
       if ((sib.queue === CardQueue.New && buryNew) || (sib.queue === CardQueue.Review && buryRev)) {
         sib.queue = CardQueue.SchedBuried;
       }
@@ -826,6 +1209,7 @@ export class Scheduler {
     if (!next) throw new Error(`invalid rating: ${rating}`);
 
     const lastInterval = asRevlogInterval(intervalKindOf(current));
+    const answeredQueue = card.queue; // captured pre-answer for the bury carve-out
     const wasDayLearning = card.queue === CardQueue.DayLearning;
     card.reps += 1;
     if (this.fsrsEnabled) card.desiredRetention = this.desiredRetentionFor(this.deckConfigFor(card));
@@ -840,14 +1224,15 @@ export class Scheduler {
         note.mod = this.now;
         note.usn = -1;
       }
-      if ((this.deckConfigFor(card).lapse?.leechAction ?? 0) === 0) {
+      if ((this.deckConfigFor(card).lapse?.leechAction ?? 1) === 0) {
         card.queue = CardQueue.Suspended;
       }
     }
     card.mod = this.now;
     card.usn = -1;
     if (card.odid) card.odue = 0; // answered inside a filtered deck → rescheduled, don't restore
-    this._burySiblings(card); // hide other cards of the same note until tomorrow
+    this._burySiblings(card, answeredQueue); // hide other cards of the same note until tomorrow
+    this._loadBalanceUpdate(card); // keep the load balancer's day cache in step
 
     const entry = new Revlog({
       id: opts.nowMs ?? nowMs(),
@@ -903,10 +1288,15 @@ export class Scheduler {
     card.type = type;
     card.left = learn.remainingSteps;
     card.memoryState = memSource.memoryState ?? null;
-    const kind = maybeAsDays({ secs: learn.scheduledSecs }, this.secsUntilRollover);
+    // Intraday learning delays get +0..25% fuzz (max +5 min), seeded per
+    // card+reps like review fuzz (rslib answering/learning.rs) — keeps cards
+    // answered in a batch from re-dueing in lockstep.
+    let secs = learn.scheduledSecs;
+    if (this.fuzz) secs += Math.floor(fuzzFactorFor(card) * Math.min(secs * 0.25, 300));
+    const kind = maybeAsDays({ secs }, this.secsUntilRollover);
     if (kind.secs !== undefined) {
       card.queue = CardQueue.Learning;
-      card.due = this.now + kind.secs; // epoch seconds (fuzz disabled)
+      card.due = this.now + kind.secs; // epoch seconds
       card.ivl = type === CardType.Relearning ? card.ivl : 0;
     } else {
       card.queue = CardQueue.DayLearning;
