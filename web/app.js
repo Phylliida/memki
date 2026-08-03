@@ -976,6 +976,46 @@ function undoButton() {
   }, "Undo");
 }
 
+/**
+ * When the next card in this deck becomes available, human-readable
+ * ("in 20 min" / "in 3h 15m" / "tomorrow" / "in 5 days"), or null if the
+ * deck has no future cards at all. Covers intraday (re)learning cards
+ * (epoch-second dues), future-day reviews, and new cards that unlock with
+ * tomorrow's daily budget at rollover.
+ */
+function nextDueText() {
+  const sched = new Scheduler(state.col);
+  const now = sched.now;
+  const dids = sched._deckAndDescendants(state.deckId);
+  let nextSec = Infinity;  // intraday (re)learning — epoch seconds
+  let nextDay = Infinity;  // review / day-learning — day number
+  let backlog = false;     // new cards waiting on tomorrow's budget
+  for (const c of state.col.cards.values()) {
+    if (!dids.has(c.did)) continue;
+    if (c.queue === CardQueue.Learning) {
+      if (c.due > now) nextSec = Math.min(nextSec, c.due);
+    } else if (c.queue === CardQueue.DayLearning || c.queue === CardQueue.Review) {
+      if (c.due > sched.daysElapsed) nextDay = Math.min(nextDay, c.due);
+    } else if (c.queue === CardQueue.New) {
+      backlog = true;
+    }
+  }
+  if (backlog) nextDay = Math.min(nextDay, sched.daysElapsed + 1);
+  const rolloverAt = now + sched.secsUntilRollover;
+  const dayAt = nextDay === Infinity ? Infinity : rolloverAt + (nextDay - sched.daysElapsed - 1) * 86400;
+  const t = Math.min(nextSec, dayAt);
+  if (t === Infinity) return null;
+  const secs = t - now;
+  if (secs < 3600) return `in ${Math.max(1, Math.round(secs / 60))} min`;
+  if (secs < 86400) {
+    const h = Math.floor(secs / 3600);
+    const m = Math.round((secs % 3600) / 60);
+    return m ? `in ${h}h ${m}m` : `in ${h}h`;
+  }
+  const days = Math.round(secs / 86400);
+  return days <= 1 ? "tomorrow" : `in ${days} days`;
+}
+
 function renderStudy() {
   const card = nextDueCard();
   state.card = card;
@@ -985,7 +1025,9 @@ function renderStudy() {
   if (!card) {
     // Undo stays reachable here too — you can grade the last due card and
     // land on this screen.
+    const next = nextDueText();
     show(back, el("p", { class: "center" }, "All caught up — nothing due in this deck."),
+      next ? el("p", { class: "center muted" }, `Next card ${next}.`) : "",
       el("div", { class: "more-bar" }, undoButton()));
     return;
   }
