@@ -191,8 +191,9 @@ hr#answer { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 .rate.good { border-color: var(--good); }
 .rate.easy { border-color: var(--easy); }
 
-/* Show Answer stands in for the rating row, so it matches its height. */
-.study-controls .rate, .show-answer { min-height: 58px; }
+/* Show Answer stands in for the rating row, so it matches its height (fixed,
+ * not min-: the buttons' natural height varies with platform line-height). */
+.study-controls .rate, .show-answer { height: 60px; }
 .show-answer { display: block; width: 100%; max-width: 320px; margin: 18px auto 0; padding: 12px; font-size: 16px; }
 
 .center { text-align: center; color: var(--muted); padding: 40px 0; }
@@ -570,7 +571,9 @@ button .ic { margin-right: 2px; }
     padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
     background: var(--panel); border-top: 1px solid var(--border); z-index: 20;
   }
-  .rate { max-width: none; min-height: 58px; }
+  .rate { max-width: none; }
+  /* Fixed bar grows with the safe-area inset — floor instead of fixed height. */
+  .study-controls .rate, .show-answer { height: auto; min-height: 60px; }
   .show-answer {
     position: fixed; left: 0; right: 0; bottom: 0; margin: 0; width: 100%; max-width: none;
     padding: 18px 10px calc(18px + env(safe-area-inset-bottom));
