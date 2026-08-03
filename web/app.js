@@ -84,6 +84,8 @@ const ICONS = {
   funnel: '<svg viewBox="0 0 24 24"><path d="M22 3H2l8 9.5V21l4-2v-6.5z"/></svg>',
   info: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>',
   x: '<svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  sun: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  moon: '<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
   "align-left": '<svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h13"/></svg>',
   "align-center": '<svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M5.5 18h13"/></svg>',
   "align-right": '<svg viewBox="0 0 24 24"><path d="M4 6h16M10 12h10M7 18h13"/></svg>',
@@ -195,8 +197,9 @@ function placeCaretAt(container, x, y) {
 
 const mediaFilesOf = (dt) => [...(dt?.files ?? [])].filter(isDroppableMedia);
 
-/** A markdown source editor over a field. Returns { el, getText, setText, focus }. */
-function mdEditor(initial = "") {
+/** A markdown source editor over a field. Returns { el, getText, setText, focus }.
+ *  opts.afterHistory: extra toolbar control(s) placed right after undo/redo. */
+function mdEditor(initial = "", { afterHistory = null } = {}) {
   const area = el("div", { class: "md", contenteditable: "plaintext-only" });
   // Engines without plaintext-only support fall back to a plain contenteditable
   // plus Enter/paste interception that keeps the content text-only.
@@ -516,6 +519,7 @@ function mdEditor(initial = "") {
   const redoBtn = tbBtn("↷", "Redo (Ctrl+Shift+Z)", () => jumpHistory(1));
   const toolbar = el("div", { class: "md-toolbar" },
     undoBtn, redoBtn,
+    ...(afterHistory ? [].concat(afterHistory) : []),
     tbBtn("B", "Bold selection: **text**", () => surround("**")),
     tbBtn("I", "Italic selection: *text*", () => surround("*")),
     tbBtn("S̶", "Strikethrough selection: ~~text~~", () => surround("~~")),
@@ -1164,6 +1168,87 @@ async function doUndo() {
  * Create a note + its cards (cloze → one per cloze number; else one per
  * template) in the collection, returning the note. Does not persist.
  */
+/**
+ * Per-field alignment + font-size toolbar buttons for a markdown editor,
+ * shared by the note editor and Add Card. Clicking cycles alignment
+ * left → center → right and font size small → medium (default) → large;
+ * holding the size button opens a popout for an exact px size. Styles are
+ * plain objects { falign: {ord: "left"|"right"}, fsize: {ord: px} } (absent
+ * keys = the note type's defaults). read() returns the current style object;
+ * write(style) persists a replacement. attach() wires the buttons to the
+ * editor and mirrors the current style onto it.
+ */
+function fieldStyleToggles(f, read, write) {
+  const ALIGN_CYCLE = ["left", "center", "right"];
+  const SIZE_CYCLE = [14, null, 28]; // px; null = the note type's default
+  let ed = null;
+  const setKey = async (key, value) => {
+    const s = { falign: { ...(read().falign ?? {}) }, fsize: { ...(read().fsize ?? {}) } };
+    if (value == null) delete s[key][f.ord]; else s[key][f.ord] = value;
+    if (!Object.keys(s.falign).length) delete s.falign;
+    if (!Object.keys(s.fsize).length) delete s.fsize;
+    await write(s);
+  };
+  const showAlign = (a) => {
+    alignTb.replaceChildren(icon(`align-${a}`));
+    alignTb.title = `Alignment: ${a} (click to change)`;
+    if (ed) ed.el.style.textAlign = a;
+  };
+  const alignTb = tbBtn(icon("align-center"), "", async () => {
+    const cur = read().falign?.[f.ord] ?? "center";
+    const next = ALIGN_CYCLE[(ALIGN_CYCLE.indexOf(cur) + 1) % ALIGN_CYCLE.length];
+    await setKey("falign", next === "center" ? null : next);
+    showAlign(next);
+  });
+  const showSize = (px) => {
+    sizeTb.style.fontSize = px == null ? "" : px <= 16 ? "11px" : px >= 26 ? "17px" : "13px";
+    sizeTb.title = `Font size: ${px == null ? "default" : px + "px"} (click to cycle, hold to enter a size)`;
+    if (ed) ed.el.style.fontSize = px == null ? "" : `${px}px`;
+  };
+  const setSize = async (px) => { await setKey("fsize", px); showSize(px); };
+  const openSizePop = () => {
+    const inp = el("input", { type: "number", min: "8", max: "96", value: String(read().fsize?.[f.ord] ?? 20) });
+    const { close } = openModal([
+      el("h3", {}, `Font size — ${f.name}`),
+      el("div", { class: "form" }, el("label", {}, "Size in pixels", inp)),
+      el("div", { class: "row" },
+        el("button", { type: "button", onclick: async () => {
+          const v = Math.round(Number(inp.value));
+          await setSize(Number.isFinite(v) && v > 0 ? Math.min(Math.max(v, 8), 96) : null);
+          close();
+        } }, "Set"),
+        el("button", { type: "button", onclick: async () => { await setSize(null); close(); } }, "Default"),
+        el("button", { type: "button", onclick: () => close() }, "Cancel")),
+    ]);
+    inp.focus();
+    inp.select();
+  };
+  let longFired = false;
+  let pressTimer = null;
+  const sizeTb = tbBtn("A", "", () => {
+    if (longFired) return; // that click ends a hold, don't also cycle
+    const cur = read().fsize?.[f.ord] ?? null;
+    const next = SIZE_CYCLE[(SIZE_CYCLE.findIndex((s) => s === cur) + 1) % SIZE_CYCLE.length];
+    setSize(next);
+  });
+  sizeTb.addEventListener("pointerdown", () => {
+    longFired = false;
+    pressTimer = setTimeout(() => { longFired = true; openSizePop(); }, 500);
+  });
+  for (const ev of ["pointerup", "pointerleave", "pointercancel"]) {
+    sizeTb.addEventListener(ev, () => clearTimeout(pressTimer));
+  }
+  sizeTb.addEventListener("contextmenu", (e) => e.preventDefault()); // no menu on hold
+  return {
+    buttons: [alignTb, sizeTb],
+    attach(editor) {
+      ed = editor;
+      showAlign(read().falign?.[f.ord] ?? "center");
+      showSize(read().fsize?.[f.ord] ?? null);
+    },
+  };
+}
+
 function addNoteWithCards(model, fields, did, tags = []) {
   const note = new Note({ mid: model.id, fields, tags }).normalize(model.sortf ?? 0);
   state.col.addNote(note);
@@ -1260,6 +1345,8 @@ function renderAddCard() {
   const modelSel = el("select", {}, ...models.map((m) => el("option", { value: m.id }, m.name)));
   modelSel.value = validModelId(state.col.conf.curModel);
   const deckSel = el("select", {}, ...decks.map((d) => el("option", { value: d.id }, d.name)));
+  // Default to the deck the last card was added to (Anki's curDeck).
+  if (decks.some((d) => d.id === state.col.conf.curDeck)) deckSel.value = String(state.col.conf.curDeck);
 
   // Top-right actions: tag + flag toggles for the new note, then Save.
   const newTags = new Set();
@@ -1277,6 +1364,13 @@ function renderAddCard() {
 
   const fieldsWrap = el("div", { class: "form-fields" });
   let inputs = [];
+  // Field align/size styles start from the last-used ones (conf.addFieldStyle,
+  // mirrored from the note editor); editing them here updates the defaults.
+  const writeNewStyle = async (s) => {
+    state.col.conf.addFieldStyle = s;
+    await putMeta(state.db, state.col);
+    schedulePreview();
+  };
   const rebuildFields = () => {
     const model = state.col.noteType(Number(modelSel.value)) ?? models[0];
     inputs = [];
@@ -1285,7 +1379,9 @@ function renderAddCard() {
       return;
     }
     fieldsWrap.replaceChildren(...model.flds.map((f) => {
-      const ed = mdEditor(f.default ?? ""); // note type may define a default value
+      const t = fieldStyleToggles(f, () => state.col.conf.addFieldStyle ?? {}, writeNewStyle);
+      const ed = mdEditor(f.default ?? "", { afterHistory: t.buttons }); // note type may define a default value
+      t.attach(ed);
       inputs.push(ed);
       return el("div", { class: "fld" }, el("span", {}, f.name), ed.el);
     }));
@@ -1297,7 +1393,7 @@ function renderAddCard() {
     const model = state.col.noteType(Number(modelSel.value)) ?? models[0];
     if (!model) { previewBox.replaceChildren(); return; }
     const fields = inputs.map((ed) => ed.getText());
-    const tmpNote = new Note({ mid: model.id, fields });
+    const tmpNote = new Note({ mid: model.id, fields, data: JSON.stringify(state.col.conf.addFieldStyle ?? {}) });
     const ords = cardOrdinalsForNote(model, tmpNote);
     if (!ords.length) {
       previewBox.replaceChildren(el("div", { class: "muted pv-count" }, "No cards yet — fill the first field."));
@@ -1335,6 +1431,15 @@ function renderAddCard() {
     if (!stripHtmlPreservingMediaFilenames(fields[0]).trim()) { setStatus("The first field is empty."); return; }
     const note = addNoteWithCards(model, fields, Number(deckSel.value),
       [...newTags].sort((a, b) => a.localeCompare(b)));
+    state.col.conf.curDeck = Number(deckSel.value); // default deck for the next card
+    // The field align/size styles become the note's own data.
+    const s = state.col.conf.addFieldStyle;
+    if (s?.falign || s?.fsize) {
+      const d = parseNoteData(note.data);
+      if (s.falign) d.falign = s.falign;
+      if (s.fsize) d.fsize = s.fsize;
+      note.data = JSON.stringify(d);
+    }
     if (newFlags.size) {
       for (const c of state.col.cardsForNote(note.id)) writeCardFlags(c, new Set(newFlags));
     }
@@ -1811,7 +1916,27 @@ function noteEditorForm(noteId, cb = {}) {
   if (!note) return el("div", { class: "center muted" }, "Note not found.");
   const model = state.col.noteType(note.mid);
 
-  const inputs = model.flds.map((f) => ({ f, ed: mdEditor(note.fields[f.ord] ?? "") }));
+  // Per-field text alignment and font size for rendered cards (stored in
+  // notes.data falign/fsize, keyed by field ord; absent = the note type's
+  // defaults). The last-used styles become the defaults for new notes
+  // (conf.addFieldStyle), so Add Card starts with them.
+  const writeStyle = async (s) => {
+    const d = parseNoteData(note.data);
+    if (s.falign) d.falign = s.falign; else delete d.falign;
+    if (s.fsize) d.fsize = s.fsize; else delete d.fsize;
+    note.data = JSON.stringify(d);
+    note.mod = Math.floor(Date.now() / 1000);
+    await putNote(state.db, note);
+    state.col.conf.addFieldStyle = s;
+    await putMeta(state.db, state.col);
+    schedulePvPop(); // the preview reflects the change
+  };
+  const inputs = model.flds.map((f) => {
+    const t = fieldStyleToggles(f, () => parseNoteData(note.data), writeStyle);
+    const ed = mdEditor(note.fields[f.ord] ?? "", { afterHistory: t.buttons });
+    t.attach(ed);
+    return { f, ed };
+  });
 
   // Tags are bubbles: one per tag in the collection, toggled on/off for this
   // note and persisted immediately; "+ New tag" opens a small popout.
@@ -2047,36 +2172,8 @@ function noteEditorForm(noteId, cb = {}) {
   };
 
   const cardCount = state.col.cardsForNote(noteId).length;
-  // Per-field text alignment for rendered cards (stored in notes.data falign,
-  // keyed by field ord; absent = the note type's default, i.e. center). The
-  // header button cycles left → center → right; the field editor mirrors it.
-  const ALIGN_CYCLE = ["left", "center", "right"];
-  const alignOf = (ord) => parseNoteData(note.data).falign?.[ord] ?? "center";
-  const alignBtn = (f, ed) => {
-    const show = (a) => {
-      btn.replaceChildren(icon(`align-${a}`));
-      btn.title = `Alignment: ${a} (click to change)`;
-      ed.el.style.textAlign = a;
-    };
-    const btn = el("button", { type: "button", class: "icon fld-align", onclick: async () => {
-      const next = ALIGN_CYCLE[(ALIGN_CYCLE.indexOf(alignOf(f.ord)) + 1) % ALIGN_CYCLE.length];
-      const d = parseNoteData(note.data);
-      if (next === "center") delete d.falign?.[f.ord];
-      else (d.falign ??= {})[f.ord] = next;
-      if (d.falign && !Object.keys(d.falign).length) delete d.falign;
-      note.data = JSON.stringify(d);
-      note.mod = Math.floor(Date.now() / 1000);
-      await putNote(state.db, note);
-      show(next);
-      schedulePvPop(); // the preview reflects the new alignment
-    } });
-    show(alignOf(f.ord));
-    return btn;
-  };
   const fieldsBox = el("div", { class: "form ne-fields" },
-    ...inputs.map(({ f, ed }) => el("div", { class: "fld" },
-      el("div", { class: "fld-head" }, el("span", {}, f.name), alignBtn(f, ed)),
-      ed.el)));
+    ...inputs.map(({ f, ed }) => el("div", { class: "fld" }, el("span", {}, f.name), ed.el)));
   fieldsBox.addEventListener("input", (e) => {
     if (!isMediaEvent(e)) scheduleSave();
     schedulePvPop();
@@ -2101,7 +2198,7 @@ function noteEditorForm(noteId, cb = {}) {
       return;
     }
     const fields = inputs.map(({ ed }) => ed.getText());
-    const tmpNote = new Note({ mid: model.id, fields, tags: [...noteTags] });
+    const tmpNote = new Note({ mid: model.id, fields, tags: [...noteTags], data: note.data });
     const ords = cardOrdinalsForNote(model, tmpNote);
     if (!ords.length) {
       pvBox.replaceChildren(el("div", { class: "muted pv-count" }, "No cards — fill the first field."));
@@ -3280,6 +3377,27 @@ async function wireNative() {
   setInterval(() => { onNativeResume(); updateBackupButton(); checkServerConnection(); }, 3 * 1000);
 }
 
+// Light/dark theme. Each theme sets [data-theme] on <html> (the palettes are
+// CSS var blocks in styles.css) plus the mobile chrome color and the toggle's
+// icon (the icon shows what you'll switch TO). A new theme = one CSS block +
+// one entry here; the toggle becomes a cycle through THEMES in order.
+const THEMES = {
+  dark: { next: "light", icon: "sun", chrome: "#1b1d24" },
+  light: { next: "dark", icon: "moon", chrome: "#f6f1e8" },
+};
+
+function applyTheme(name) {
+  if (!THEMES[name]) name = "dark";
+  document.documentElement.dataset.theme = name;
+  localStorage.setItem("theme", name);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", THEMES[name].chrome);
+  const b = document.getElementById("btn-theme");
+  if (b) {
+    b.replaceChildren(icon(THEMES[name].icon));
+    b.title = `Switch to ${THEMES[name].next} mode`;
+  }
+}
+
 function wireHeader() {
   // ☰ menu: collapse the header actions behind a toggle. State persists
   // across launches; collapsed by default.
@@ -3311,6 +3429,13 @@ function wireHeader() {
   document.getElementById("btn-backup").addEventListener("click", doBackup);
   document.getElementById("btn-history").addEventListener("click", showHistory);
   document.getElementById("btn-folder").addEventListener("click", onChangeFolder);
+
+  const themeBtn = document.getElementById("btn-theme");
+  themeBtn.addEventListener("click", () => {
+    applyTheme(THEMES[document.documentElement.dataset.theme]?.next ?? "dark");
+    themeBtn.blur(); // don't keep it looking focused after a tap
+  });
+  applyTheme(localStorage.getItem("theme") ?? "dark"); // icon + chrome color
 }
 
 // Anki-style shortcuts: space/Enter flips; 1–4 (and space/Enter) grade.

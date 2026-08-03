@@ -381,14 +381,18 @@ export function renderCard(noteType, ord, note, opts = {}) {
   // Inline/block HTML in legacy fields passes through mdToHtml unchanged.
   const fields = fieldMap(noteType, note);
   for (const k in fields) fields[k] = mdToHtml(fields[k]);
-  // Per-field alignment overrides (notes.data falign, keyed by field ord).
-  // Empty fields are left alone so {{#Field}} conditionals still work.
-  const falign = parseNoteData(note.data).falign;
-  if (falign) {
+  // Per-field alignment/font-size overrides (notes.data falign/fsize, keyed
+  // by field ord). Empty fields are left alone so {{#Field}} still works.
+  const nd = parseNoteData(note.data);
+  if (nd.falign || nd.fsize) {
     for (const f of noteType.flds) {
-      const a = falign[f.ord];
-      if ((a === "left" || a === "right" || a === "center") && fields[f.name]) {
-        fields[f.name] = `<div style="text-align:${a}">${fields[f.name]}</div>`;
+      const a = nd.falign?.[f.ord];
+      const sz = nd.fsize?.[f.ord];
+      const styles = [];
+      if (a === "left" || a === "right" || a === "center") styles.push(`text-align:${a}`);
+      if (Number.isFinite(sz) && sz > 0) styles.push(`font-size:${sz}px`);
+      if (styles.length && fields[f.name]) {
+        fields[f.name] = `<div style="${styles.join(";")}">${fields[f.name]}</div>`;
       }
     }
   }

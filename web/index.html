@@ -4,6 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#1b1d24" />
+  <!-- Restore the saved theme before first paint (kept in sync by app.js). -->
+  <script>
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "dark";
+  </script>
   <title>Memki</title>
   <!--
     Import map so the .apkg interop module's bare imports (fflate/fzstd) and
@@ -45,6 +49,7 @@
       <button id="btn-backup" title="Download a full JSON backup (collection + media)">Backup</button>
       <button id="btn-history" title="Save/load history" hidden>History</button>
       <button id="btn-folder" title="Choose where to save" hidden>Folder</button>
+      <button id="btn-theme" title="Toggle theme" aria-label="Toggle theme"></button>
       <input id="file-import" type="file" accept=".apkg,.colpkg,.json,.csv,.tsv,.txt,application/zip,application/octet-stream" hidden />
     </div>
     </div>

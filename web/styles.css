@@ -1,3 +1,6 @@
+/* Theming: every color is a variable; :root holds the dark theme (the
+   default), [data-theme="..."] blocks override. A future theme is one more
+   attribute block here plus one entry in THEMES in app.js. */
 :root {
   --bg: #1b1d24;
   --panel: #252833;
@@ -5,12 +8,45 @@
   --text: #e6e8ee;
   --muted: #9aa0b0;
   --accent: #6ea8fe;
+  --on-accent: #10131a;   /* text/icons on top of accent fills */
   --border: #3a3e4d;
   --again: #e06c75;
   --hard: #d19a66;
   --good: #98c379;
   --easy: #56b6c2;
+  --card-bg: #2a2e3a;     /* the note-type canvas inside .card-face */
+  --card-text: #e6e8ee;
+  --type-good-bg: #1e5c2e; --type-good-fg: #d6f5dd;
+  --type-bad-bg: #6e1f1f;  --type-bad-fg: #ffd9d9;
+  --type-missed-bg: #555;  --type-missed-fg: #eee;
 }
+
+/* Light theme: warm white/brown, black text on white. Must come after :root
+   (equal specificity, source order wins). */
+[data-theme="light"] {
+  --bg: #f6f1e8;
+  --panel: #fffdf8;
+  --panel-2: #efe7d8;
+  --text: #241d15;
+  --muted: #7d6f5c;
+  --accent: #8b5e34;
+  --on-accent: #fffdf8;
+  --border: #d9cbb5;
+  --again: #b94a48;
+  --hard: #a86a2a;
+  --good: #4d7a3a;
+  --easy: #2f7f85;
+  --card-bg: #ffffff;
+  --card-text: #000000;
+  --type-good-bg: #d8ecd0; --type-good-fg: #24491f;
+  --type-bad-bg: #f2d5d5;  --type-bad-fg: #6b2222;
+  --type-missed-bg: #e0d9cc; --type-missed-fg: #444444;
+}
+
+/* Dark mode forces a dark card canvas even over note-type CSS that hardcodes
+   a white one (most Anki decks do). Light mode leaves note-type styling
+   alone, since deck CSS is generally authored for light cards. */
+[data-theme="dark"] .card-face .card { background: var(--card-bg) !important; color: var(--card-text) !important; }
 
 * { box-sizing: border-box; }
 
@@ -91,6 +127,9 @@ button:disabled { opacity: 0.5; cursor: default; }
 
 /* Deck list */
 .decks-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+/* Button groups in page headers (e.g. Browse's Filters / Create Filtered
+   Deck) match the header actions' 8px spacing. */
+.decks-head .row { display: flex; gap: 8px; align-items: center; }
 .decks-head h2 { margin: 0; }
 .deck-actions { display: flex; gap: 4px; opacity: 0; transition: opacity 0.1s; }
 .deck:hover .deck-actions { opacity: 1; }
@@ -129,16 +168,16 @@ button.icon:hover { border-color: var(--border); }
 .card-face .av { display: block; margin: 14px auto; max-width: 100%; }
 /* Code blocks stay left-aligned even though card text defaults to centered. */
 .card-face pre { text-align: left; }
-/* The inner .card carries the note type's own (scoped) CSS; give it a clean
-   default canvas so light-themed deck styling reads correctly. */
-.card-face .card { background: #fff; color: #000; border-radius: 8px; padding: 20px; }
-hr#answer { border: none; border-top: 1px solid #ccc; margin: 20px 0; }
+/* The inner .card carries the note type's own (scoped) CSS; the theme sets
+   the default canvas (dark mode forces it — see the theme block above). */
+.card-face .card { background: var(--card-bg); color: var(--card-text); border-radius: 8px; padding: 20px; }
+hr#answer { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 
 /* type-in-the-answer */
 .typeans {
   display: block; width: 100%; max-width: 360px; margin: 10px auto; padding: 8px 10px;
   font-size: 18px; border: 1px solid var(--border); border-radius: 6px;
-  background: #fff; color: #000;
+  background: var(--card-bg); color: var(--card-text);
 }
 
 .study-controls { margin-top: 18px; display: flex; justify-content: center; gap: 10px; }
@@ -175,7 +214,7 @@ main h3 { margin: 18px 0 4px; font-size: 15px; color: var(--muted); }
 .md-tb:hover { border-color: var(--border); }
 .md { min-height: 64px; padding: 10px; outline: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 .md:focus { box-shadow: inset 0 0 0 2px var(--accent); }
-.md.dropping { box-shadow: inset 0 0 0 2px var(--accent); background: rgba(110, 168, 254, 0.08); }
+.md.dropping { box-shadow: inset 0 0 0 2px var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .md img { max-width: 100%; height: auto; vertical-align: middle; }
 .md img.img-selected { outline: 2px dashed var(--accent); outline-offset: 1px; }
 .md-w { display: inline-block; vertical-align: middle; }
@@ -189,9 +228,9 @@ main h3 { margin: 18px 0 4px; font-size: 15px; color: var(--muted); }
 
 /* type-in-the-answer diff (Anki classes) */
 code#typeans { display: inline-block; padding: 6px 10px; border-radius: 6px; background: var(--panel-2); font-size: 1em; }
-.typeGood { background: #1e5c2e; color: #d6f5dd; }
-.typeBad { background: #6e1f1f; color: #ffd9d9; text-decoration: line-through; }
-.typeMissed { background: #555; color: #eee; }
+.typeGood { background: var(--type-good-bg); color: var(--type-good-fg); }
+.typeBad { background: var(--type-bad-bg); color: var(--type-bad-fg); text-decoration: line-through; }
+.typeMissed { background: var(--type-missed-bg); color: var(--type-missed-fg); }
 #typearrow { display: inline-block; }
 
 /* cloze */
@@ -219,7 +258,7 @@ a.hint { display: inline-block; color: var(--accent); }
 .io-stage img { display: block; max-width: 100%; height: auto; }
 .io-svg { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
 .io-mask-edit { fill: rgba(110, 168, 254, 0.45); stroke: var(--accent); stroke-width: 0.4; }
-.io-mask-q { fill: #6ea8fe; }
+.io-mask-q { fill: var(--accent); }
 .io-mask-active { fill: none; stroke: var(--again); stroke-width: 0.8; }
 .io-masklist { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .io-maskchip { font-size: 12px; padding: 4px 8px; }
@@ -248,10 +287,6 @@ a.hint { display: inline-block; color: var(--accent); }
    label activates its first labelable control — which would be the first
    toolbar button (it "auto-bolded" before this was a div). */
 .form .fld { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--muted); }
-/* Field header: name left, per-field alignment toggle right. */
-.fld-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.fld-align { padding: 2px 6px; color: var(--muted); }
-.fld-align:hover { color: var(--text); }
 .form input, .form textarea, .form select {
   background: var(--panel-2); color: var(--text);
   border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 15px; font-family: inherit;
@@ -349,20 +384,14 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 /* Anchored popouts (note-type creation, tag pop). */
 .nt-pop .nt-cloze-row { align-items: center; }
 
-/* Note-editor preview modal: cards stacked, a bit wider than the default. */
 /* Inline card preview in the note editor: below the fields by default. */
 .ne-main { display: flex; flex-direction: column; gap: 12px; }
-.ne-pv { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.ne-pv { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* Same metrics as the field labels (.fld), so in the side-by-side layout the
+   preview column's top lines up with the editor column's. */
+.ne-pv .pv-count { font-size: 14px; margin: 0; }
 .ne-pv:empty { display: none; }
 .ne-pv .card-face { margin: 0; }
-/* Wide desktop: the browse edit pane grows a second column — preview beside
-   the fields (four columns overall: filters | list | editor | preview). */
-@media (min-width: 1550px) {
-  main:has(.browse-layout) { max-width: 1800px; }
-  .browse-edit { flex-basis: 940px; }
-  .browse-edit .ne-main { flex-direction: row; align-items: flex-start; }
-  .browse-edit .ne-main > * { flex: 1 1 0; min-width: 0; }
-}
 
 /* Flag bubbles (immediate set; one flag per card) */
 .flag-picker { display: inline-flex; gap: 4px; align-items: center; }
@@ -386,7 +415,7 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 .flag-bub.f5.on { background: #f783ac; border-color: #f783ac; }
 .flag-bub.f6.on { background: #3bc9db; border-color: #3bc9db; }
 .flag-bub.f7.on { background: #b197fc; border-color: #b197fc; }
-.flag-bub.on { color: #10131a; }
+.flag-bub.on { color: var(--on-accent); }
 
 /* Tag bubbles in the note editor */
 .form-tags { display: flex; flex-direction: column; gap: 6px; }
@@ -404,14 +433,14 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
   padding: 4px 12px; border-radius: 14px; font-size: 13px;
   background: var(--panel-2); border: 1px solid var(--border);
 }
-.tag-bub.on { background: var(--accent); border-color: var(--accent); color: #10131a; font-weight: 600; }
+.tag-bub.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
 .tag-bub.ghost { border-style: dashed; color: var(--muted); background: transparent; }
 .tag-pop { left: 0; right: auto; top: calc(100% + 6px); }
 
 /* Browse filter tabs */
 .filter-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 12px; }
 .ftab { padding: 5px 12px; font-size: 13px; border-radius: 14px; display: inline-flex; align-items: center; gap: 6px; }
-.ftab.active { border-color: var(--accent); background: var(--accent); color: #10131a; font-weight: 600; }
+.ftab.active { border-color: var(--accent); background: var(--accent); color: var(--on-accent); font-weight: 600; }
 .ftab.ghost { border-style: dashed; color: var(--muted); }
 .ftab-x { display: inline-flex; opacity: 0.7; }
 .ftab-x:hover { opacity: 1; }
@@ -442,8 +471,8 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 .side-clear { font-size: 12px; }
 
 /* Toggled-on chips get colored in; flags use their own color. */
-.side-item.on { background: var(--accent); color: #10131a; font-weight: 600; }
-.side-item.on .flag-dot { color: #10131a; }
+.side-item.on { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.side-item.on .flag-dot { color: var(--on-accent); }
 .side-item.f1.on { background: #ff6b6b; }
 .side-item.f2.on { background: #ffa94d; }
 .side-item.f3.on { background: #8ce99a; }
@@ -498,6 +527,18 @@ button .ic { margin-right: 2px; }
 /* Touch devices have no hover: keep per-deck actions visible. */
 @media (hover: none) {
   .deck-actions { opacity: 1; }
+}
+
+/* Wide desktop: the browse edit pane grows a second column — preview beside
+   the fields (four columns overall: filters | list | editor | preview), with
+   list : editor : preview sharing the space equally (1:1:1). Placed after
+   the base browse rules so it wins at equal specificity. */
+@media (min-width: 1550px) {
+  main:has(.browse-layout) { max-width: 1800px; }
+  .browse-layout .browse-list { flex: 1 1 0; }
+  .browse-edit { flex: 2 1 0; }
+  .browse-edit .ne-main { flex-direction: row; align-items: flex-start; }
+  .browse-edit .ne-main > * { flex: 1 1 0; min-width: 0; }
 }
 
 @media (max-width: 640px) {

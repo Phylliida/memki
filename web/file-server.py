@@ -30,6 +30,7 @@ Security notes (deliberately simple, please audit):
 """
 
 import base64
+import json
 import os
 import secrets
 import sys
@@ -42,8 +43,34 @@ PORT = int(os.environ.get("OSS_ANKI_PORT", "8787"))
 SAVE = "memki.json"
 MEDIA = "memki.media"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# Save folder: CLI arg if given, else ./save inside the repo.
-ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.join(REPO, "save")
+# The chosen save folder is remembered here (gitignored) so it survives
+# restarts; a CLI arg overrides it (and becomes the new remembered value).
+STATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".file-server-state.json")
+
+
+def load_root():
+    if len(sys.argv) > 1:
+        return os.path.abspath(sys.argv[1])
+    try:
+        with open(STATE) as f:
+            p = json.load(f).get("root")
+            if p:
+                return os.path.abspath(os.path.expanduser(p))
+    except (OSError, ValueError):
+        pass
+    return os.path.join(REPO, "save")
+
+
+def remember_root(p):
+    try:
+        with open(STATE, "w") as f:
+            json.dump({"root": p}, f)
+    except OSError:
+        pass  # remembering is best-effort; the server still works
+
+
+ROOT = load_root()
+remember_root(ROOT)
 Path(ROOT).mkdir(parents=True, exist_ok=True)
 # static_url_path="" serves the repo root (/web/, /src/, /vendor/...) so the
 # app works fully from this server; the API lives under /api/.
@@ -123,6 +150,7 @@ def set_root():
     os.makedirs(p, exist_ok=True)  # typing a new path creates the folder
     migrate(p)
     ROOT = p
+    remember_root(ROOT)
     return jsonify(path=ROOT, label=os.path.basename(ROOT))
 
 

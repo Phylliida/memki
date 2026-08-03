@@ -207,3 +207,15 @@ test("no falign (or invalid notes.data) renders fields unwrapped", () => {
   assert.equal(renderCard(nt, 0, new Note({ mid: 27, fields: ["Q", "A"] })).question, "Q");
   assert.equal(renderCard(nt, 0, new Note({ mid: 27, fields: ["Q", "A"], data: "not json" })).question, "Q");
 });
+
+test("notes.data fsize wraps the field in a font-size div", () => {
+  const nt = basicNoteType(28);
+  const note = new Note({ mid: 28, fields: ["Q", "A"], data: '{"falign":{"0":"left"},"fsize":{"0":14}}' });
+  assert.equal(renderCard(nt, 0, note).question, '<div style="text-align:left;font-size:14px">Q</div>');
+});
+
+test("fsize ignores non-positive/non-numeric values", () => {
+  const nt = basicNoteType(29);
+  const note = new Note({ mid: 29, fields: ["Q", "A"], data: '{"fsize":{"0":-5,"1":"big"}}' });
+  assert.equal(renderCard(nt, 0, note).question, "Q");
+});
