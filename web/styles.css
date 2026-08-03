@@ -277,6 +277,14 @@ button.danger { border-color: var(--again); color: var(--again); margin-left: au
 .hist-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
 .hist-meta { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Study history modal */
+.sh-tabs { margin: 0 0 10px; }
+.sh-next { margin: 0 0 8px; font-size: 13px; }
+.hist-meta .sh-again { color: var(--again); }
+.hist-meta .sh-hard { color: var(--hard); }
+.hist-meta .sh-good { color: var(--good); }
+.hist-meta .sh-easy { color: var(--easy); }
+
 /* Centered modal (on top of everything) */
 .modal-overlay {
   position: fixed; inset: 0; z-index: 100;

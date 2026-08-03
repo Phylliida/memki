@@ -3,7 +3,7 @@
 // fzstd builds from ../vendor/ (see the import map in index.html).
 
 import {
-  Collection, Note, Card, NoteTypeKind, CardType, CardQueue, imageOcclusionNoteType,
+  Collection, Note, Card, NoteTypeKind, CardType, CardQueue, RevlogType, imageOcclusionNoteType,
   basicNoteType, basicReversedNoteType, basicOptionalReversedNoteType, basicTypeNoteType, clozeNoteType,
   cardFlagSet, writeCardFlags,
 } from "../src/model.js";
@@ -136,7 +136,7 @@ function sanitizeCurModel(col) {
 // Undo/redo is our own snapshot stack (native contenteditable undo is
 // unreliable across the programmatic widget re-renders): Ctrl+Z /
 // Ctrl+Shift+Z / Ctrl+Y, or the ↶ ↷ toolbar buttons. For longer time travel
-// there's the note-level History modal.
+// there's the note-level Edit History modal.
 
 function tbBtn(label, title, onClick) {
   const b = el("button", { type: "button", class: "md-tb", title, onclick: (e) => { e.preventDefault(); onClick(); } }, label);
@@ -1935,6 +1935,103 @@ function noteEditorForm(noteId, cb = {}) {
     ]);
   };
 
+  // Study history modal: the review log (rating + date) for each card of
+  // this note, with bubble tabs to switch between every deck that has
+  // scheduling metadata for it — live cards plus state archived on the note
+  // for decks it was removed from. Above the log: the next study date and
+  // how long until then.
+  const openStudyHistoryModal = () => {
+    const sched = new Scheduler(state.col);
+    const easeLabel = { 1: "Again", 2: "Hard", 3: "Good", 4: "Easy" };
+    const easeClass = { 1: "again", 2: "hard", 3: "good", 4: "easy" };
+    const untilText = (t) => { // t: epoch seconds
+      const secs = t - sched.now;
+      if (secs <= 0) return "due now";
+      if (secs < 3600) return `in ${Math.max(1, Math.round(secs / 60))} min`;
+      if (secs < 86400) {
+        const h = Math.floor(secs / 3600);
+        const m = Math.round((secs % 3600) / 60);
+        return m ? `in ${h}h ${m}m` : `in ${h}h`;
+      }
+      const days = Math.round(secs / 86400);
+      return days <= 1 ? "tomorrow" : `in ${days} days`;
+    };
+    // Next-study line for a card (or an archived snapshot — same fields).
+    const nextStudy = (c) => {
+      if (c.queue === CardQueue.Suspended) return "Suspended — not scheduled.";
+      if (c.queue === CardQueue.New) return "New card — not scheduled yet.";
+      if (c.queue === CardQueue.Learning) { // intraday: due is epoch seconds
+        return `Next study: ${new Date(c.due * 1000).toLocaleString()} (${untilText(c.due)})`;
+      }
+      // Review / day-learning / buried: due is a day number whose day starts
+      // at rollover (same math as nextDueText).
+      const t = sched.now + sched.secsUntilRollover + (c.due - sched.daysElapsed - 1) * 86400;
+      return `Next study: ${new Date(t * 1000).toLocaleDateString()} (${untilText(t)})`;
+    };
+
+    // One tab per (deck, ord) with metadata: live cards first, then
+    // archived snapshots (note.data sched map, keyed `deckName \x1f ord`)
+    // that have no live card.
+    const tabs = state.col.cardsForNote(note.id).map((c) => ({
+      deck: deckName(c.did), ord: c.ord, card: c, live: true,
+    }));
+    const liveKeys = new Set(tabs.map((t) => `${t.deck}\x1f${t.ord}`));
+    let archived = {};
+    try { archived = JSON.parse(note.data || "{}").sched ?? {}; } catch { /* no metadata */ }
+    for (const [key, snap] of Object.entries(archived)) {
+      if (liveKeys.has(key)) continue;
+      const [deck, ord] = key.split("\x1f");
+      tabs.push({ deck, ord: Number(ord), card: snap, live: false });
+    }
+    // Disambiguate tabs sharing a deck name by the card's template.
+    const deckCounts = {};
+    for (const t of tabs) deckCounts[t.deck] = (deckCounts[t.deck] ?? 0) + 1;
+    for (const t of tabs) {
+      t.label = t.deck;
+      if (deckCounts[t.deck] > 1) {
+        t.label += " · " + (model.type === NoteTypeKind.Cloze
+          ? `Cloze ${t.ord + 1}`
+          : model.tmpls[t.ord]?.name ?? `Card ${t.ord + 1}`);
+      }
+      if (!t.live) t.label += " (removed)";
+    }
+
+    if (!tabs.length) {
+      const { close } = openModal([
+        el("h3", {}, "Study history"),
+        el("div", { class: "center muted" }, "No scheduling info for this note yet."),
+        el("div", { class: "row" }, el("button", { type: "button", onclick: () => close() }, "Close")),
+      ]);
+      return;
+    }
+
+    const content = el("div");
+    const showTab = (idx) => {
+      const t = tabs[idx];
+      tabBar.querySelectorAll(".ftab").forEach((b, i) => b.classList.toggle("active", i === idx));
+      const entries = state.col.revlog
+        .filter((e) => e.cid === t.card.id)
+        .sort((a, b) => b.id - a.id);
+      const rows = entries.length
+        ? entries.map((e) => el("div", { class: "hist-row" },
+            el("div", { class: "hist-meta" },
+              el("b", { class: easeClass[e.ease] ? `sh-${easeClass[e.ease]}` : "" },
+                easeLabel[e.ease] ?? (e.type === RevlogType.Rescheduled ? "Rescheduled" : "Manual")),
+              el("span", { class: "muted" }, ` · ${new Date(e.id).toLocaleString()}`))))
+        : [el("div", { class: "center muted" }, "No reviews recorded yet.")];
+      content.replaceChildren(el("div", { class: "muted sh-next" }, nextStudy(t.card)), ...rows);
+    };
+    const tabBar = el("div", { class: "filter-tabs sh-tabs" },
+      ...tabs.map((t, i) => el("button", { type: "button", class: "ftab", onclick: () => showTab(i) }, t.label)));
+    const { close } = openModal([
+      el("h3", {}, "Study history"),
+      tabBar,
+      content,
+      el("div", { class: "row" }, el("button", { type: "button", onclick: () => close() }, "Close")),
+    ]);
+    showTab(0);
+  };
+
   const cardCount = state.col.cardsForNote(noteId).length;
   const fieldsBox = el("div", { class: "form ne-fields" },
     ...inputs.map(({ f, ed }) => el("div", { class: "fld" }, el("span", {}, f.name), ed.el)));
@@ -2001,7 +2098,8 @@ function noteEditorForm(noteId, cb = {}) {
         async (n) => { await applyToNoteCards(note, (s, c) => s.toggleFlag(c, n)); refresh(); })),
     el("div", { class: "row ne-bottom" },
       el("button", { onclick: () => openDeckModalForNote(note, refresh) }, "Decks"),
-      el("button", { onclick: openHistoryModal }, "History"),
+      el("button", { onclick: openHistoryModal }, "Edit History"),
+      el("button", { onclick: openStudyHistoryModal }, "Study History"),
       el("button", { onclick: openChangeTypeModal }, "Change Type"),
       el("button", { class: "danger", onclick: del }, "Delete"),
     ),
