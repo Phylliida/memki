@@ -22,7 +22,7 @@
     "./sqljs-node": "./src/sqljs-node.js"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "node --test 'test/**/*.test.js'",
     "serve": "python3 web/serve.py 8000",
     "build:android": "bash scripts/build-capacitor.sh && npx cap sync android"
   },

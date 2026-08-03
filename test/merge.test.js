@@ -110,6 +110,24 @@ test("review due dates shift by the collections' creation-day offset", () => {
   assert.equal(merged.due, 30); // still due 30 days from target-day 0 = today
 });
 
+test("due-date shift uses calendar days, not rounded seconds (Anki parity)", () => {
+  const src = source();
+  const target = Collection.createDefault();
+  // Source created Jan 4 2026 06:00 local, target Aug 1 2026 18:15 local:
+  // 209 calendar days apart, but 209 days + 12.25h of raw seconds — a naive
+  // Math.round(Δsec/86400) rounds to 210, one day more than Anki's delta.
+  src.crt = Math.floor(new Date(2026, 0, 4, 6, 0).getTime() / 1000);
+  target.crt = Math.floor(new Date(2026, 7, 1, 18, 15).getTime() / 1000);
+  const rev = [...src.cards.values()][0];
+  rev.type = 2;
+  rev.queue = 2;
+  rev.due = 210; // source-day 210 = Aug 2 2026 = day 1 of the target collection
+
+  mergeCollection(target, src);
+  const merged = [...target.cards.values()].find((c) => c.queue === 2);
+  assert.equal(merged.due, 1); // 210 − 209 calendar days; not 210 − 210 = 0
+});
+
 test("new cards' position-based due is not shifted", () => {
   const src = source();
   const target = Collection.createDefault();

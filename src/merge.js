@@ -11,11 +11,26 @@
 // imported id) are resolved by assigning a fresh id from the target.
 
 import { Note, Card, CardType, CardQueue } from "./model.js";
+import { nowSec } from "./ids.js";
+import { tzOffsetMinutes } from "./timing.js";
 
 /** Day-based due (days since collection creation), vs. seconds or a position. */
 function hasDayBasedDue(card) {
   return card.queue === CardQueue.Review || card.queue === CardQueue.DayLearning ||
     (card.queue < 0 && card.type === CardType.Review);
+}
+
+/**
+ * Whole local calendar days between the two collections' creation dates.
+ * Anki's importer computes the delta from integer day counts (days-elapsed
+ * on both sides); rounding the raw seconds difference instead
+ * (Math.round((src−tgt)/86400)) can be off by a day depending on the two
+ * crts' times of day — a card due today in Anki would land on tomorrow.
+ */
+function crtDayShift(srcCrt, tgtCrt) {
+  const off = tzOffsetMinutes(nowSec()) * 60;
+  const dayOf = (sec) => Math.floor(((sec ?? 0) - off) / 86400);
+  return dayOf(srcCrt) - dayOf(tgtCrt);
 }
 
 /**
@@ -48,7 +63,7 @@ export function mergeCollection(target, source) {
   // Review-type due dates are day numbers relative to the collection's creation
   // day, which differs between collections: shift them so "due N days from now"
   // still means N days from now after the merge.
-  const dayShift = Math.round(((source.crt ?? 0) - (target.crt ?? 0)) / 86400);
+  const dayShift = crtDayShift(source.crt, target.crt);
   const shiftDue = (card) => {
     if (!dayShift) return;
     if (card.odid) {
