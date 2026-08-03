@@ -1,27 +1,27 @@
 /* Theming: every color is a variable; :root holds the dark theme (the
    default), [data-theme="..."] blocks override. A future theme is one more
    attribute block here plus one entry in THEMES in app.js. */
-/* Dark theme: warm amber/brown with NO blue hues (night use — blue light
-   suppresses melatonin). Accent is amber, Easy is warm yellow (no cyan),
-   text is warm parchment rather than bluish white. */
+/* Dark theme: neutral greys/blacks with only a slight warm cast (night use —
+   blue light suppresses melatonin, so no blue hues). Accent is amber, Easy
+   is warm yellow (no cyan), text is warm off-white rather than bluish. */
 :root {
-  --bg: #1a1512;
-  --panel: #241d17;
-  --panel-2: #2e251c;
-  --text: #e8dcc8;
-  --muted: #a89a86;
+  --bg: #191817;
+  --panel: #232220;
+  --panel-2: #2c2b28;
+  --text: #e3e0da;
+  --muted: #9c9890;
   --accent: #d99a4e;
-  --on-accent: #201510;   /* text/icons on top of accent fills */
-  --border: #4a3c2e;
+  --on-accent: #1c1a17;   /* text/icons on top of accent fills */
+  --border: #45423c;
   --again: #e06c75;
   --hard: #d19a66;
   --good: #98c379;
   --easy: #e0c060;
-  --card-bg: #282119;     /* the note-type canvas inside .card-face */
-  --card-text: #e8dcc8;
+  --card-bg: #262422;     /* the note-type canvas inside .card-face */
+  --card-text: #e3e0da;
   --type-good-bg: #2e4a1e; --type-good-fg: #d8eec9;
   --type-bad-bg: #6e1f1f;  --type-bad-fg: #ffd9d0;
-  --type-missed-bg: #4a423a; --type-missed-fg: #e8dcc8;
+  --type-missed-bg: #43403b; --type-missed-fg: #e3e0da;
 }
 
 /* Light theme: warm white/brown, black text on white. Must come after :root

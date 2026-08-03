@@ -19,10 +19,12 @@ The API mirrors what web/http-bridge.js expects (base64 over JSON):
     POST /api/media/<name>  {data: b64} -> {modified}
 
 Security notes (deliberately simple, please audit):
-  - Binds to 127.0.0.1 only. A random per-start token is required in the
-    X-Auth header for every /api/* call — without it, any website you visit
-    could otherwise talk to this server (it answers CORS preflights so the
-    real app can). The token is in the printed connect URL.
+  - Binds to 127.0.0.1 only. A random token is required in the X-Auth
+    header for every /api/* call — without it, any website you visit could
+    otherwise talk to this server (it answers CORS preflights so the real
+    app can). The token is in the printed connect URL; it's generated on
+    first start and then reused (stored owner-only in the state file) so
+    browsers that saved it keep working across restarts.
   - File names are confined to the folder: anything containing a path
     separator is rejected.
   - Writes go to <name>.tmp then os.replace over the target, so readers
@@ -38,39 +40,52 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request
 
-TOKEN = secrets.token_urlsafe(16)
-PORT = int(os.environ.get("OSS_ANKI_PORT", "8787"))
-SAVE = "memki.json"
-MEDIA = "memki.media"
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# The chosen save folder is remembered here (gitignored) so it survives
-# restarts; a CLI arg overrides it (and becomes the new remembered value).
+# The chosen save folder and the auth token are remembered here (gitignored)
+# so they survive restarts; a CLI arg overrides the folder (and becomes the
+# new remembered value).
 STATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".file-server-state.json")
 
 
-def load_root():
-    if len(sys.argv) > 1:
-        return os.path.abspath(sys.argv[1])
+def load_state():
     try:
         with open(STATE) as f:
-            p = json.load(f).get("root")
-            if p:
-                return os.path.abspath(os.path.expanduser(p))
+            s = json.load(f)
+            return s if isinstance(s, dict) else {}
     except (OSError, ValueError):
-        pass
-    return os.path.join(REPO, "save")
+        return {}
 
 
-def remember_root(p):
+def save_state(s):
     try:
         with open(STATE, "w") as f:
-            json.dump({"root": p}, f)
+            json.dump(s, f)
+        os.chmod(STATE, 0o600)  # the token is a secret; owner-only
     except OSError:
         pass  # remembering is best-effort; the server still works
 
 
-ROOT = load_root()
-remember_root(ROOT)
+STATE_DATA = load_state()
+
+# Auth token: generated once on first start, then reused (stored next to the
+# save-folder path) so the connect URL — and the token browsers saved in
+# localStorage — keeps working across restarts.
+TOKEN = STATE_DATA.get("token") or secrets.token_urlsafe(16)
+PORT = int(os.environ.get("OSS_ANKI_PORT", "8787"))
+SAVE = "memki.json"
+MEDIA = "memki.media"
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+if len(sys.argv) > 1:
+    ROOT = os.path.abspath(sys.argv[1])
+else:
+    ROOT = os.path.abspath(os.path.expanduser(STATE_DATA.get("root") or os.path.join(REPO, "save")))
+
+
+def remember():
+    save_state({"root": ROOT, "token": TOKEN})
+
+
+remember()
 Path(ROOT).mkdir(parents=True, exist_ok=True)
 # static_url_path="" serves the repo root (/web/, /src/, /vendor/...) so the
 # app works fully from this server; the API lives under /api/.
@@ -150,7 +165,7 @@ def set_root():
     os.makedirs(p, exist_ok=True)  # typing a new path creates the folder
     migrate(p)
     ROOT = p
-    remember_root(ROOT)
+    remember()
     return jsonify(path=ROOT, label=os.path.basename(ROOT))
 
 

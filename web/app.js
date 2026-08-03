@@ -3288,9 +3288,10 @@ function recordBackupStamp() {
 }
 
 /**
- * Companion-server mode only: if the server goes down or restarts (its
- * token changes on every start), re-open the connect gate instead of
- * silently not-saving. Blocks until reconnected, then reloads from the file.
+ * Companion-server mode only: if the server goes down or restarts, re-open
+ * the connect gate instead of silently not-saving (it auto-reconnects with
+ * the stored token once the server is back). Blocks until reconnected, then
+ * reloads from the file.
  */
 let serverGateOpen = false;
 async function checkServerConnection() {
@@ -3382,7 +3383,7 @@ async function wireNative() {
 // icon (the icon shows what you'll switch TO). A new theme = one CSS block +
 // one entry here; the toggle becomes a cycle through THEMES in order.
 const THEMES = {
-  dark: { next: "light", icon: "sun", chrome: "#1a1512" },
+  dark: { next: "light", icon: "sun", chrome: "#191817" },
   light: { next: "dark", icon: "moon", chrome: "#f6f1e8" },
 };
 

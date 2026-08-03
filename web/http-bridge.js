@@ -159,7 +159,9 @@ export async function writeToFolder(name, base64) {
 /**
  * Make sure a companion server is connected. Fast path: stored credentials
  * probe OK. Otherwise show the blocking gate with a paste box for the
- * connect URL file-server.py prints.
+ * connect URL file-server.py prints. While the gate is up it keeps probing
+ * with the stored credentials, so a server that is merely restarting
+ * reconnects on its own (the token survives restarts now).
  */
 export async function ensureSaveFolder() {
   if (await probe()) return;
@@ -169,21 +171,27 @@ export async function ensureSaveFolder() {
   gate.querySelector("h2").textContent = "Connect to a save folder";
   gate.querySelector("p").textContent =
     "Run `python3 web/file-server.py` on this computer and paste the " +
-    "connect URL it prints (it contains a token that changes on every " +
-    "server start). Your cards are NOT being saved until you connect.";
+    "connect URL it prints. Your cards are NOT being saved until you " +
+    "connect — if the server is just restarting, this reconnects on its own.";
   const input = el("input", { type: "text", placeholder: "http://127.0.0.1:8787/web/?token=…" });
   btn.before(input);
   btn.textContent = "Connect";
+  if (loadStored()) msg.textContent = "Server unreachable — retrying with the saved token…";
   gate.hidden = false;
+  // Single click handler whose promise is re-armed each loop iteration.
+  let clickResolve = null;
+  const onClick = () => clickResolve?.();
+  btn.addEventListener("click", onClick);
   try {
     for (;;) {
-      await new Promise((resolve) => btn.addEventListener("click", resolve, { once: true }));
-      // Empty box = retry the stored credentials (transient server dip).
-      if (!input.value.trim()) {
-        if (await probe()) return;
-        msg.textContent = "Still can't reach the server with the stored token — paste the new connect URL.";
-        continue;
-      }
+      if (await probe()) return; // stored creds work — auto-reconnect
+      const clicked = await Promise.race([
+        new Promise((r) => { clickResolve = () => r(true); }),
+        new Promise((r) => setTimeout(() => r(false), 3000)),
+      ]);
+      clickResolve = null;
+      if (!clicked) continue; // poll tick — loop probes again
+      if (!input.value.trim()) continue; // empty box = manual retry (probe ran above)
       try {
         if (await tryConnect(parseConnectUrl(input.value))) return;
         msg.textContent = "Can't reach that server, or the token is wrong.";
@@ -192,6 +200,7 @@ export async function ensureSaveFolder() {
       }
     }
   } finally {
+    btn.removeEventListener("click", onClick);
     gate.hidden = true;
     input.remove();
   }
