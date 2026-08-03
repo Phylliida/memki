@@ -3382,7 +3382,7 @@ async function wireNative() {
 // icon (the icon shows what you'll switch TO). A new theme = one CSS block +
 // one entry here; the toggle becomes a cycle through THEMES in order.
 const THEMES = {
-  dark: { next: "light", icon: "sun", chrome: "#1b1d24" },
+  dark: { next: "light", icon: "sun", chrome: "#1a1512" },
   light: { next: "dark", icon: "moon", chrome: "#f6f1e8" },
 };
 

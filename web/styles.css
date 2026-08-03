@@ -1,24 +1,27 @@
 /* Theming: every color is a variable; :root holds the dark theme (the
    default), [data-theme="..."] blocks override. A future theme is one more
    attribute block here plus one entry in THEMES in app.js. */
+/* Dark theme: warm amber/brown with NO blue hues (night use — blue light
+   suppresses melatonin). Accent is amber, Easy is warm yellow (no cyan),
+   text is warm parchment rather than bluish white. */
 :root {
-  --bg: #1b1d24;
-  --panel: #252833;
-  --panel-2: #2e313e;
-  --text: #e6e8ee;
-  --muted: #9aa0b0;
-  --accent: #6ea8fe;
-  --on-accent: #10131a;   /* text/icons on top of accent fills */
-  --border: #3a3e4d;
+  --bg: #1a1512;
+  --panel: #241d17;
+  --panel-2: #2e251c;
+  --text: #e8dcc8;
+  --muted: #a89a86;
+  --accent: #d99a4e;
+  --on-accent: #201510;   /* text/icons on top of accent fills */
+  --border: #4a3c2e;
   --again: #e06c75;
   --hard: #d19a66;
   --good: #98c379;
-  --easy: #56b6c2;
-  --card-bg: #2a2e3a;     /* the note-type canvas inside .card-face */
-  --card-text: #e6e8ee;
-  --type-good-bg: #1e5c2e; --type-good-fg: #d6f5dd;
-  --type-bad-bg: #6e1f1f;  --type-bad-fg: #ffd9d9;
-  --type-missed-bg: #555;  --type-missed-fg: #eee;
+  --easy: #e0c060;
+  --card-bg: #282119;     /* the note-type canvas inside .card-face */
+  --card-text: #e8dcc8;
+  --type-good-bg: #2e4a1e; --type-good-fg: #d8eec9;
+  --type-bad-bg: #6e1f1f;  --type-bad-fg: #ffd9d0;
+  --type-missed-bg: #4a423a; --type-missed-fg: #e8dcc8;
 }
 
 /* Light theme: warm white/brown, black text on white. Must come after :root
@@ -181,13 +184,15 @@ hr#answer { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 }
 
 .study-controls { margin-top: 18px; display: flex; justify-content: center; gap: 10px; }
-.rate { flex: 1; max-width: 150px; display: flex; flex-direction: column; gap: 2px; align-items: center; padding: 10px; }
+.rate { flex: 1; max-width: 150px; display: flex; flex-direction: column; gap: 2px; align-items: center; justify-content: center; padding: 10px; }
 .rate small { color: var(--muted); font-size: 12px; }
 .rate.again { border-color: var(--again); }
 .rate.hard { border-color: var(--hard); }
 .rate.good { border-color: var(--good); }
 .rate.easy { border-color: var(--easy); }
 
+/* Show Answer stands in for the rating row, so it matches its height. */
+.study-controls .rate, .show-answer { min-height: 58px; }
 .show-answer { display: block; width: 100%; max-width: 320px; margin: 18px auto 0; padding: 12px; font-size: 16px; }
 
 .center { text-align: center; color: var(--muted); padding: 40px 0; }
