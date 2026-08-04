@@ -975,6 +975,7 @@ function nextDueCard() {
 
 function startStudy(deckId) {
   state.deckId = deckId;
+  state.studiedCount = 0; // grades this session (drives the auto-return below)
   renderStudy();
 }
 
@@ -1039,6 +1040,10 @@ function renderStudy() {
   const back = el("div", { class: "crumbs", onclick: renderDecks }, "← Decks");
 
   if (!card) {
+    // Done for the day after actually studying: straight back to the deck
+    // list. (Entering a deck with nothing due still shows the caught-up
+    // screen with the next-due time.)
+    if (state.studiedCount) { renderDecks(); return; }
     // Undo stays reachable here too — you can grade the last due card and
     // land on this screen.
     const next = nextDueText();
@@ -1139,6 +1144,7 @@ async function gradeCard(rating) {
   await putNote(state.db, state.col.notes.get(card.nid));
   await putRevlog(state.db, entry);
   await putMeta(state.db, state.col); // persist deck daily counters (newToday/revToday)
+  state.studiedCount = (state.studiedCount ?? 0) + 1;
   renderStudy();
 }
 
