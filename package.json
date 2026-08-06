@@ -7,7 +7,7 @@
   "author": "Phylliida Dev",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Phylliida/anki.git"
+    "url": "https://github.com/Phylliida/memki.git"
   },
   "exports": {
     ".": "./src/index.js",
