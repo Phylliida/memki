@@ -1,0 +1,1 @@
+Reproducible Builds: releases are now built and signed by CI and published to GitHub Releases; F-Droid verifies and ships the same signature. No app changes.
