@@ -1,0 +1,1 @@
+Build fix: track Capacitor's generated cordova plugin Gradle files so the project configures from a clean checkout (needed for F-Droid's build pipeline).
