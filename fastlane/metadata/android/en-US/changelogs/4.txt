@@ -1,0 +1,1 @@
+Added store screenshots to the F-Droid listing (no app changes).
