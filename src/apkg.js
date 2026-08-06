@@ -239,8 +239,23 @@ function readModernTables(db, col) {
     const normal = pbFields(kindBlob).get(1)?.[0];
     const deck = defaultDeck(id, name.replace(/\x1f/g, "::"));
     deck.mod = mtime;
-    if (normal instanceof Uint8Array) deck.conf = pbInt(pbFields(normal), 1, 1) || 1;
-    else deck.dyn = 1;
+    if (normal instanceof Uint8Array) {
+      const nf = pbFields(normal);
+      deck.conf = pbInt(nf, 1, 1) || 1;
+      // Per-deck daily-limit overrides (Deck.Normal fields 6/7; 8/9 are
+      // DayLimit { 1: limit, 2: today } "today only" overrides).
+      if (nf.has(6)) deck.revLimit = pbInt(nf, 6, 0);
+      if (nf.has(7)) deck.newLimit = pbInt(nf, 7, 0);
+      const dayLimit = (no) => {
+        const blob = nf.get(no)?.[0];
+        if (!(blob instanceof Uint8Array)) return null;
+        const dl = pbFields(blob);
+        return { limit: pbInt(dl, 1, 0), today: pbInt(dl, 2, 0) };
+      };
+      const revToday = dayLimit(8), newToday = dayLimit(9);
+      if (revToday) deck.revLimitToday = revToday;
+      if (newToday) deck.newLimitToday = newToday;
+    } else deck.dyn = 1;
     col.decks[String(id)] = deck;
   }
 

@@ -1,0 +1,1 @@
+First F-Droid release: Memki, an offline Anki-compatible flashcard app with FSRS-6/SM-2 scheduling, .apkg import/export, and a single-file collection you can sync anywhere.

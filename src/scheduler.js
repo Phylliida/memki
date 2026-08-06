@@ -776,7 +776,7 @@ export class Scheduler {
    */
   queue(deckId, { now } = {}) {
     const nowS = now ?? this.now;
-    const learnAheadSecs = this.col.conf?.collapseTime ?? 1200;
+    const learnAheadSecs = this._learnAheadSecs();
     const dids = this._deckAndDescendants(deckId);
     const learning = [], learningAhead = [], dayLearning = [], review = [], newCards = [];
     for (const card of this.col.cards.values()) {
@@ -878,11 +878,10 @@ export class Scheduler {
     const budgetOf = (did) => {
       if (!remaining.has(did)) {
         const deck = this.col.decks[String(did)];
-        const dc = this.deckConfigFor({ did });
-        remaining.set(did, deck ? {
-          new: Math.max(0, (dc.new?.perDay ?? 20) - this._counterValue(deck, "newToday")),
-          rev: Math.max(0, (dc.rev?.perDay ?? 200) - this._counterValue(deck, "revToday")),
-        } : { new: Infinity, rev: Infinity });
+        // Gather budgets are the same remaining daily limits the deck list
+        // displays; a missing deck is unlimited.
+        remaining.set(did, deck ? this._remainingLimits(deck)
+          : { review: Infinity, new: Infinity, capNewToReview: false });
       }
       return remaining.get(did);
     };
@@ -905,21 +904,18 @@ export class Scheduler {
     };
     return {
       // Taking a card requires (and spends) budget along the whole chain.
-      // v3: new cards also consume the review budget unless the deck preset
+      // v3: new cards also consume the review budget unless the collection
       // sets "new cards ignore review limit".
       take: (did, kind) => {
-        const entries = chainFor(did).map((d) => ({
-          b: budgetOf(d),
-          needRev: kind === "rev" ||
-            !(this.deckConfigFor({ did: d }).new?.ignoreReviewLimit ?? false),
-        }));
-        for (const { b, needRev } of entries) {
+        const needRev = kind === "rev" || !this._newCardsIgnoreReviewLimit();
+        const entries = chainFor(did).map((d) => budgetOf(d));
+        for (const b of entries) {
           if (kind === "new" && b.new <= 0) return false;
-          if (needRev && b.rev <= 0) return false;
+          if (needRev && b.review <= 0) return false;
         }
-        for (const { b, needRev } of entries) {
+        for (const b of entries) {
           if (kind === "new") b.new -= 1;
-          if (needRev) b.rev -= 1;
+          if (needRev) b.review -= 1;
         }
         return true;
       },
@@ -1179,10 +1175,142 @@ export class Scheduler {
     }
   }
 
-  /** Due counts for a deck (and subdecks): { new, learning, review }. */
-  counts(deckId, opts) {
-    const q = this.queue(deckId, opts);
-    return { new: q.new.length, learning: q.learning.length, review: q.review.length };
+  /** Learn-ahead window in seconds (Anki config `collapseTime`, default 20 min). */
+  _learnAheadSecs() {
+    return this.col.conf?.collapseTime ?? 1200;
+  }
+
+  /**
+   * "New cards ignore review limit" (rslib BoolKey::NewCardsIgnoreReviewLimit)
+   * is a collection-wide flag, default false. Older versions of this app stored
+   * it per preset (dconf.new.ignoreReviewLimit); honor that as a fallback so
+   * existing collections keep their behavior.
+   */
+  _newCardsIgnoreReviewLimit() {
+    return this.col.conf?.newCardsIgnoreReviewLimit
+      ?? Object.values(this.col.dconf ?? {}).some((dc) => dc.new?.ignoreReviewLimit)
+      ?? false;
+  }
+
+  /**
+   * Remaining daily limits for one deck today (rslib decks/limits.rs
+   * RemainingLimits::new): a per-deck limit set "today" wins over a plain
+   * per-deck override, which wins over the deck options preset. Studied-today
+   * counters are subtracted — and new cards studied today also eat the review
+   * budget unless the collection-wide ignore flag is set. Filtered decks have
+   * no limits.
+   */
+  _remainingLimits(deck) {
+    if (deck.dyn) return { review: 9999, new: 9999, capNewToReview: false };
+    const dc = this.deckConfigFor({ did: deck.id });
+    const today = this.daysElapsed;
+    let review = (deck.revLimitToday?.today === today ? deck.revLimitToday.limit : null)
+      ?? deck.revLimit ?? dc.rev?.perDay ?? 200;
+    let newLimit = (deck.newLimitToday?.today === today ? deck.newLimitToday.limit : null)
+      ?? deck.newLimit ?? dc.new?.perDay ?? 20;
+    const newToday = this._counterValue(deck, "newToday");
+    review -= this._counterValue(deck, "revToday");
+    newLimit -= newToday;
+    const capNewToReview = !this._newCardsIgnoreReviewLimit();
+    if (capNewToReview) {
+      review -= newToday;
+      newLimit = Math.min(newLimit, review);
+    }
+    return { review: Math.max(review, 0), new: Math.max(newLimit, 0), capNewToReview };
+  }
+
+  /**
+   * Raw due counts per deck (rslib storage/deck/due_counts.sql): no daily
+   * limits and no sibling-burying simulation — the deck list counts every due
+   * card, even ones a study session would bury. Intraday learning counts cards
+   * due within the learn-ahead window; new cards have no due cutoff.
+   */
+  _dueCountsPerDeck() {
+    const learnCutoff = this.now + this._learnAheadSecs();
+    const counts = new Map(); // did -> { new, review, intraday, interday }
+    const entry = (did) => {
+      if (!counts.has(did)) counts.set(did, { new: 0, review: 0, intraday: 0, interday: 0 });
+      return counts.get(did);
+    };
+    for (const card of this.col.cards.values()) {
+      switch (card.queue) {
+        case CardQueue.New: entry(card.did).new++; break;
+        case CardQueue.Review:
+          if (card.due <= this.daysElapsed) entry(card.did).review++;
+          break;
+        case CardQueue.DayLearning:
+          if (card.due <= this.daysElapsed) entry(card.did).interday++;
+          break;
+        case CardQueue.Learning:
+          if (card.due < learnCutoff) entry(card.did).intraday++;
+          break;
+        case CardQueue.Preview:
+          if (card.due <= learnCutoff) entry(card.did).intraday++;
+          break;
+        // suspended / buried: not counted
+      }
+    }
+    return counts;
+  }
+
+  /**
+   * Displayed due counts for every deck (rslib decks/tree.rs
+   * sum_counts_and_apply_limits_v3): a node's count is its own cards plus its
+   * children's capped counts, capped by the node's remaining daily limits —
+   * interday learning spends the review budget first, then reviews, then new
+   * cards. Children are additionally capped by ancestor limits only when the
+   * collection-wide "apply all parent limits" flag is set (default off).
+   * @returns {Map<number, { new: number, learning: number, review: number }>}
+   */
+  deckCounts() {
+    const due = this._dueCountsPerDeck();
+    const decks = Object.values(this.col.decks);
+    const limits = new Map(decks.map((d) => [d.id, this._remainingLimits(d)]));
+    // Parent linkage by name; a deck whose parent is missing attaches to the
+    // nearest existing ancestor (Anki drops it from the tree until a DB check).
+    const byName = new Map(decks.map((d) => [d.name, d.id]));
+    const children = new Map(); // parent did (0 = top level) -> [did]
+    for (const d of decks) {
+      const parts = d.name.split("::");
+      let pid = 0;
+      for (let i = parts.length - 1; i > 0 && !pid; i--) {
+        const anc = byName.get(parts.slice(0, i).join("::"));
+        if (anc != null && anc !== d.id) pid = anc;
+      }
+      if (!children.has(pid)) children.set(pid, []);
+      children.get(pid).push(d.id);
+    }
+    const applyAll = this.col.conf?.applyAllParentLimits ?? false;
+    const out = new Map();
+    const visit = (did, parentLimits) => {
+      const rem = { ...limits.get(did) };
+      if (parentLimits) { // RemainingLimits::cap_to(parent)
+        rem.review = Math.min(rem.review, parentLimits.review);
+        rem.new = Math.min(rem.new, parentLimits.new);
+      }
+      const sum = due.get(did) ?? { new: 0, review: 0, intraday: 0, interday: 0 };
+      const total = { ...sum };
+      for (const kid of children.get(did) ?? []) {
+        const c = visit(kid, applyAll ? rem : null);
+        total.new += c.new; total.review += c.review;
+        total.intraday += c.intraday; total.interday += c.interday;
+      }
+      const interday = Math.min(total.interday, rem.review);
+      const left = rem.review - interday;
+      const review = Math.min(total.review, left);
+      let newC = Math.min(total.new, rem.new);
+      if (rem.capNewToReview) newC = Math.min(newC, left - review);
+      const capped = { new: newC, review, intraday: total.intraday, interday };
+      out.set(did, { new: capped.new, learning: capped.intraday + capped.interday, review: capped.review });
+      return capped;
+    };
+    for (const top of children.get(0) ?? []) visit(top, applyAll ? { review: 9999, new: 9999 } : null);
+    return out;
+  }
+
+  /** Due counts for a deck (and subdecks) as shown in the deck list: { new, learning, review }. */
+  counts(deckId) {
+    return this.deckCounts().get(Number(deckId)) ?? { new: 0, learning: 0, review: 0 };
   }
 
   /** Preview the four button outcomes for a card without mutating it. */

@@ -926,9 +926,11 @@ function renderDecks() {
   state.card = null;
   setActiveNav(null);
   const sched = new Scheduler(state.col, { fuzz: true });
+  const countsByDeck = sched.deckCounts();
+  const countsFor = (d) => countsByDeck.get(Number(d.id)) ?? { new: 0, learning: 0, review: 0 };
   const decks = Object.values(state.col.decks).sort((a, b) => a.name.localeCompare(b.name));
   const rows = decks.map((d) => {
-    const c = sched.counts(d.id);
+    const c = countsFor(d);
     const depth = d.name.split("::").length - 1;
     const leaf = d.name.split("::").pop();
     const actions = d.dyn
@@ -959,11 +961,14 @@ function renderDecks() {
     ...rows,
     rows.length ? "" : el("p", { class: "center" }, "No decks yet. Add a card or import an .apkg."),
   );
-  const total = decks.reduce((n, d) => {
-    const c = sched.counts(d.id);
+  // Parent rows already include their subdecks, so only top-level decks feed
+  // the totals (otherwise subdeck cards would be counted twice).
+  const topLevel = decks.filter((d) => !d.name.includes("::"));
+  const total = topLevel.reduce((n, d) => {
+    const c = countsFor(d);
     return n + c.new + c.learning + c.review;
   }, 0);
-  const studied = decks.reduce(
+  const studied = topLevel.reduce(
     (n, d) => n + sched._counterValue(d, "newToday") + sched._counterValue(d, "revToday"), 0);
   setStatus(`${state.col.cards.size} cards · ${total} due · ${studied} studied today`);
 }
@@ -2313,7 +2318,9 @@ function renderDeckOptions(deckId) {
   const newBury = check(nu.bury ?? false);
 
   const revPerDay = num(rev.perDay ?? 200);
-  const newIgnoreRev = check(nu.ignoreReviewLimit ?? false);
+  // Anki stores this as a collection-wide flag (shown here like Anki's deck
+  // options does); the legacy per-preset key is only a fallback for old saves.
+  const newIgnoreRev = check(state.col.conf.newCardsIgnoreReviewLimit ?? nu.ignoreReviewLimit ?? false);
   const autoplayChk = check(dc.autoplay ?? true);
   const maxIvl = num(rev.maxIvl ?? 36500);
   const easyBonus = num(rev.ease4 ?? 1.3, "0.05");
@@ -2393,7 +2400,8 @@ function renderDeckOptions(deckId) {
     nu.initialFactor = Math.round((Number(startEase.value) || 2.5) * 1000);
     nu.bury = newBury.checked;
     rev.perDay = Number(revPerDay.value) || 0;
-    nu.ignoreReviewLimit = newIgnoreRev.checked;
+    state.col.conf.newCardsIgnoreReviewLimit = newIgnoreRev.checked;
+    delete nu.ignoreReviewLimit; // legacy per-preset key; now collection-wide
     dc.autoplay = autoplayChk.checked;
     rev.maxIvl = Number(maxIvl.value) || 36500;
     rev.ease4 = Number(easyBonus.value) || 1.3;
@@ -2467,7 +2475,7 @@ function renderDeckOptions(deckId) {
       field("Maximum reviews/day", revPerDay,
         "Cap on reviews shown per day. Learning cards that cross a day boundary count against it, and by default it also gates new-card introduction."),
       inline(newIgnoreRev, "New cards ignore review limit",
-        "Keep introducing new cards even on days the review limit is already used up."),
+        "Keep introducing new cards even on days the review limit is already used up. Like in Anki, this is a collection-wide switch, not per preset."),
       inline(autoplayChk, "Automatically play audio",
         "Play a card's first audio/video as soon as the card is shown."),
       field("Maximum interval (days)", maxIvl,
