@@ -1,4 +1,13 @@
-# Build, sign, and publish the release APK for each version tag.
+# Build, sign, and publish the release APK for each new version.
+#
+# Trigger model: runs on EVERY push to main (branch pushes fire reliably
+# here; tag-push/create events in this repo don't reach Actions). The job
+# reads versionName from android/app/build.gradle and exits early when a
+# GitHub Release for that version already exists — so the release process
+# is simply "bump versionName/versionCode + changelog, push main". The tag
+# is created by `gh release create` (via GITHUB_TOKEN, which deliberately
+# doesn't re-trigger other workflows). Manual dispatch on a tag still
+# works for rebuilding an existing tagged release.
 #
 # This is the upstream-signed APK that F-Droid's Reproducible Builds
 # verify against: the fdroiddata metadata `Binaries:` URL points at the
@@ -10,19 +19,18 @@
 #   MEMKI_KEYSTORE_PASSWORD  keystore password
 #   MEMKI_KEY_ALIAS          key alias
 #   MEMKI_KEY_PASSWORD       key password
-#
-# Trigger: pushing a version tag (v*) or manual dispatch.
 
 name: Build + sign + publish release APK
 
 on:
   push:
-    tags: ['v*']
-  create: # tag creation is a separate, more reliable event than tag push
+    branches: [main]
+    tags: ['v*'] # harmless if these events do arrive someday
+  create: # same
   workflow_dispatch: {}
 
 permissions:
-  contents: write # create the GitHub Release
+  contents: write # create the GitHub Release + tag
 
 jobs:
   release:
@@ -35,35 +43,68 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Version source of truth: android/app/build.gradle (branch push).
+      # Manual dispatch on a tag uses the tag name instead.
+      - name: Determine version
+        id: ver
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VER="${GITHUB_REF_NAME#v}"
+          else
+            VER=$(grep -oP 'versionName "\K[^"]+' android/app/build.gradle)
+          fi
+          [ -n "$VER" ] || { echo "could not determine version"; exit 1; }
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          echo "Building release for version $VER"
+
+      - name: Skip if this release already exists
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ steps.ver.outputs.ver }}" >/dev/null 2>&1; then
+            echo "Release v${{ steps.ver.outputs.ver }} already exists — nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup Node
+        if: steps.gate.outputs.skip == 'false'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Install JS deps
+        if: steps.gate.outputs.skip == 'false'
         run: npm ci
 
       - name: Build Capacitor webDir
+        if: steps.gate.outputs.skip == 'false'
         run: bash scripts/build-capacitor.sh
 
       - name: Setup JDK
+        if: steps.gate.outputs.skip == 'false'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Sync Capacitor
+        if: steps.gate.outputs.skip == 'false'
         run: npx cap sync android
 
       # Unsigned first: signing is a separate apksigner step, so the
       # build itself stays byte-identical to F-Droid's unsigned build.
       - name: Build unsigned release APK
+        if: steps.gate.outputs.skip == 'false'
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
 
       - name: Sign with release keystore
+        if: steps.gate.outputs.skip == 'false'
         id: sign
         env:
           MEMKI_KEYSTORE_B64: ${{ secrets.MEMKI_KEYSTORE_B64 }}
@@ -73,8 +114,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "$MEMKI_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-          VER="${GITHUB_REF_NAME#v}" # v1.0.4 → 1.0.4
-          OUT="memki-$VER.apk"
+          OUT="memki-${{ steps.ver.outputs.ver }}.apk"
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$BT/apksigner" sign \
             --ks "$RUNNER_TEMP/release.keystore" \
@@ -86,8 +126,12 @@ jobs:
           "$BT/apksigner" verify --print-certs "$OUT" | head -2
           echo "apk=$OUT" >> "$GITHUB_OUTPUT"
 
-      - name: Publish GitHub Release
+      # Creates the tag too when it doesn't exist yet (at --target); with
+      # an existing tag (e.g. v1.0.5) the release simply uses it.
+      - name: Publish GitHub Release (+ tag if needed)
+        if: steps.gate.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" "${{ steps.sign.outputs.apk }}" \
-          --title "$GITHUB_REF_NAME" --generate-notes
+        run: gh release create "v${{ steps.ver.outputs.ver }}" "${{ steps.sign.outputs.apk }}" \
+          --title "v${{ steps.ver.outputs.ver }}" --generate-notes \
+          --target "${{ github.sha }}"
