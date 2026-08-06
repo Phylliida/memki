@@ -71,6 +71,38 @@ function debounced(fn, ms = 180) {
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 }
 
+// --- Add-card draft: small IndexedDB scratch store, deliberately NOT part of
+// the collection (no note, no deck, nothing visible in Browse). It only
+// remembers the in-progress Add Card form so an accidental Back (or a crash,
+// or closing the tab) doesn't lose work. Cleared on Save.
+let _draftDbP = null;
+function draftDb() {
+  return (_draftDbP ??= new Promise((resolve, reject) => {
+    const req = indexedDB.open("memki-ui", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("kv");
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  }));
+}
+async function draftGet(key) {
+  const db = await draftDb();
+  return new Promise((resolve, reject) => {
+    const rq = db.transaction("kv").objectStore("kv").get(key);
+    rq.onsuccess = () => resolve(rq.result);
+    rq.onerror = () => reject(rq.error);
+  });
+}
+async function draftWrite(key, value) { // value === undefined deletes
+  const db = await draftDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("kv", "readwrite");
+    if (value === undefined) tx.objectStore("kv").delete(key);
+    else tx.objectStore("kv").put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 // --- minimal inline SVG icons (no emoji; stroke/fill follow currentColor) ---
 
 const ICONS = {
@@ -1348,20 +1380,24 @@ function tagBubblePicker(selected, onChange) {
   return box;
 }
 
-function renderAddCard() {
+async function renderAddCard() {
   state.card = null;
   setActiveNav("btn-add");
+  const DRAFT_KEY = "addCardDraft";
+  const draft = await draftGet(DRAFT_KEY).catch(() => null);
   const models = Object.values(state.col.models);
   const decks = Object.values(state.col.decks).filter((d) => !d.dyn);
   const modelSel = el("select", {}, ...models.map((m) => el("option", { value: m.id }, m.name)));
   modelSel.value = validModelId(state.col.conf.curModel);
+  if (draft && models.some((m) => m.id === draft.mid)) modelSel.value = String(draft.mid);
   const deckSel = el("select", {}, ...decks.map((d) => el("option", { value: d.id }, d.name)));
   // Default to the deck the last card was added to (Anki's curDeck).
   if (decks.some((d) => d.id === state.col.conf.curDeck)) deckSel.value = String(state.col.conf.curDeck);
+  if (draft && decks.some((d) => d.id === draft.did)) deckSel.value = String(draft.did);
 
   // Top-right actions: tag + flag toggles for the new note, then Save.
-  const newTags = new Set();
-  const newFlags = new Set();
+  const newTags = new Set(draft?.tags ?? []);
+  const newFlags = new Set(draft?.flags ?? []);
   const flagWrap = el("span");
   const renderNewFlags = () => {
     flagWrap.replaceChildren(flagPicker(newFlags, (n) => {
@@ -1369,6 +1405,7 @@ function renderAddCard() {
       if (newFlags.size === 1 && newFlags.has(n)) newFlags.clear();
       else { newFlags.clear(); newFlags.add(n); }
       renderNewFlags();
+      scheduleDraftSave(); // defined below; clicks only fire after render
     }));
   };
   renderNewFlags();
@@ -1426,11 +1463,28 @@ function renderAddCard() {
     wireSoundVolumes(previewBox);
     typesetMath();
   };
+  // Draft autosave: every edit persists the form to IndexedDB (debounced), so
+  // an accidental Back / crash / tab close can't lose work. A fully-empty
+  // draft deletes itself. Switching note type deliberately does NOT save —
+  // otherwise flipping models would wipe the old model's field texts.
+  const scheduleDraftSave = debounced(async () => {
+    const d = {
+      mid: Number(modelSel.value), did: Number(deckSel.value),
+      fields: inputs.map((ed) => ed.getText()),
+      tags: [...newTags], flags: [...newFlags],
+    };
+    const empty = d.fields.every((t) => !t.trim()) && !d.tags.length && !d.flags.length;
+    await draftWrite(DRAFT_KEY, empty ? undefined : d).catch(() => {});
+  });
   const schedulePreview = debounced(updatePreview);
-  fieldsWrap.addEventListener("input", schedulePreview);
-  deckSel.addEventListener("change", schedulePreview);
+  fieldsWrap.addEventListener("input", () => { schedulePreview(); scheduleDraftSave(); });
+  deckSel.addEventListener("change", () => { schedulePreview(); scheduleDraftSave(); });
   modelSel.addEventListener("change", () => { rebuildFields(); schedulePreview(); });
   rebuildFields();
+  if (draft?.fields) {
+    inputs.forEach((ed, i) => { if (draft.fields[i]) ed.setText(draft.fields[i]); });
+    setStatus("Draft restored — you can pick up where you left off.");
+  }
   updatePreview();
 
   const save = async () => {
@@ -1456,6 +1510,7 @@ function renderAddCard() {
     }
     await putNoteAndMeta(note);
     for (const c of state.col.cardsForNote(note.id)) await putCard(state.db, c);
+    await draftWrite(DRAFT_KEY, undefined).catch(() => {}); // draft consumed
     const count = state.col.cardsForNote(note.id).length;
     setStatus(`Added (${count} card${count > 1 ? "s" : ""}).`);
     renderDecks();
@@ -1472,7 +1527,7 @@ function renderAddCard() {
       fieldsWrap,
       el("h2", { class: "pv-head" }, "Preview"),
       previewBox,
-      el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Tags"), tagBubblePicker(newTags)),
+      el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Tags"), tagBubblePicker(newTags, scheduleDraftSave)),
       el("div", { class: "form-tags" }, el("span", { class: "muted tag-lbl" }, "Flags"), flagWrap),
     ),
   );
