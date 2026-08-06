@@ -1,6 +1,10 @@
 Memki.apk
 oss-anki.apk
 Memki.ipa
+# Release signing key — NEVER committed (CI gets it via Actions secrets).
+# The committed android/app/anki-debug.keystore is a public DEBUG key, fine.
+*.keystore
+!android/app/anki-debug.keystore
 save/
 node_modules/
 .direnv/
