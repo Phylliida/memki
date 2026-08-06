@@ -18,6 +18,7 @@ name: Build + sign + publish release APK
 on:
   push:
     tags: ['v*']
+  create: # tag creation is a separate, more reliable event than tag push
   workflow_dispatch: {}
 
 permissions:
@@ -25,6 +26,8 @@ permissions:
 
 jobs:
   release:
+    # `create` fires for branches too — only tags may build a release.
+    if: github.event_name != 'create' || github.event.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
