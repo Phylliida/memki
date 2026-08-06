@@ -6,7 +6,9 @@ real Anki collections (`.apkg` / `.colpkg`).
 
 - **Vanilla** — plain ES modules, no framework, no build step. The scheduling
   core has **zero runtime dependencies**.
-- **Local-first** — browser app with data in IndexedDB (planned).
+- **Local-first** — your collection lives in a save folder you choose (single
+  JSON + media files) on Android and desktop browsers; IndexedDB is the
+  plain-browser fallback.
 - **Precise** — the FSRS-6 scheduler is a faithful port of
   [`fsrs-rs`](https://github.com/open-spaced-repetition/fsrs-rs), the crate Anki
   itself links against, validated against its golden test vectors.
@@ -31,12 +33,11 @@ export back to `.apkg`.
 | Template renderer (fields, conditionals, **cloze**, **type-in**, MathJax) | ✅ |
 | IndexedDB persistence | ✅ whole-collection + incremental card/revlog/media |
 | Browser study UI (`web/`) | ✅ study (keyboard shortcuts, audio/video, note-type CSS, **undo**) |
-| Browse (Anki search syntax) / edit / delete + deck management | ✅ `deck:`/`tag:`/`is:`/`prop:`/`-`/`or`; edit notes; deck tree |
+| Browse (Anki search syntax) / edit / delete + deck management | ✅ `deck:`/`tag:`/`is:`/`prop:`/`-`/`or`; edit notes (tag chips, flag toggles); deck tree |
 | Card operations | ✅ suspend, bury, flag, forget, set due date, move deck (browser + review) |
-| Deck options UI | ✅ steps, limits, intervals, ease, leech, FSRS retention/params |
+| Deck options UI | ✅ steps, limits, intervals, ease, leech, easy days (load balancing), FSRS retention/params |
 | Note-type / template editor | ✅ fields (add/remove/rename), templates, CSS, with note/card migration |
 | Filtered decks + custom study | ✅ build/empty (odid/odue), review-ahead / all / search presets |
-| Image occlusion | ✅ self-contained editor (rectangle masks, hide-one-guess-one) |
 | Statistics | ✅ counts, retention, review history + due forecast |
 
 Not implemented (by request): AnkiWeb sync, FSRS optimizer, add-ons, TTS.
@@ -61,16 +62,41 @@ existing collections on app load — so every note is markdown-mode. (The
 HTML→markdown step is lossy for styled markup like colors and font tags;
 math, `[sound:]`, cloze markers, and image widths are preserved.)
 
-## Run the app
+## Run the web app locally
+
+The web app needs no build and no npm install — it is plain ES modules served
+as static files. The only requirement is Python 3 (any static file server
+works, but see the caching note below):
 
 ```bash
-npm run serve   # no-cache static server on :8000 (web/serve.py)
+python3 web/serve.py        # or: npm run serve — same thing, port 8000
 # then open http://localhost:8000/web/
 ```
 
-The whole app runs fully offline. `.apkg` import/export lazily loads vendored
-sql.js + fflate + fzstd builds from `vendor/` (see the import map in
-`web/index.html`); MathJax is vendored there too.
+A custom port: `python3 web/serve.py 8080`.
+
+Why not just double-click `web/index.html`? Browsers refuse to load ES
+modules from `file://` pages, so the app must be served over HTTP. Any
+static server rooted at the repo works, but prefer `web/serve.py` over
+`python3 -m http.server`: the plain server lets browsers cache `app.js`
+heuristically and you end up running stale code after edits; `serve.py`
+disables caching.
+
+Where your cards go depends on the browser (the app detects this
+automatically on first launch):
+
+- **Chrome / Edge** — you pick a save folder; the collection lives there as
+  `memki.json` + `memki.media/` (details in the next section).
+- **Firefox / Safari** — no File System Access API, so either run the
+  companion file server (see *Firefox / Safari: companion file server*
+  below) for the same save-folder behavior, or let the app fall back to
+  IndexedDB storage inside the browser profile.
+- Other browsers — IndexedDB.
+
+Everything runs fully offline; there is no account and no network traffic.
+`.apkg` import/export lazily loads vendored sql.js + fflate + fzstd builds
+from `vendor/` (see the import map in `web/index.html`); MathJax is
+vendored there too.
 
 ## Android app (Capacitor) / desktop save file
 
@@ -92,9 +118,10 @@ while the app is open a 3-second poll picks up external changes
 the folder; **Backup** writes a fixed-name `memki-backup.json` into it
 (also refreshed automatically every 15 min and on backgrounding) and greys
 out when it's already up to date; **History** shows recent saves/loads. On
-the web, the folder grant may need one click per browser session (none when
-installed as a PWA with a persistent grant); browsers without the File
-System Access API (Firefox/Safari) keep using IndexedDB.
+the web, the folder grant may need one click per browser session; browsers
+without the File System Access API (Firefox/Safari) can use the companion
+server below, or IndexedDB. The Android app is fully offline and requests
+no permissions at all.
 
 ```bash
 npm install
@@ -102,12 +129,15 @@ npm run build:android   # assembles dist/ (scripts/build-capacitor.sh) + npx cap
 # then open android/ in Android Studio, or: cd android && ./gradlew assembleDebug
 ```
 
+An iOS IPA is built by CI (`.github/workflows/ios-build.yml`); `install-ipa.sh`
+downloads the latest artifact and can sideload it via AltServer.
+
 How it fits together: `web/storage.js` picks the backend at runtime —
 IndexedDB (`src/storage.js`) in plain browsers, or `web/storage-file.js`
 (same function surface over the save folder) on Android, when
 `showOpenFilePicker` exists, or when the companion server is reachable.
 The bridge behind it is `web/native-bridge.js` (talking to the `SaveFolder`
-plugin at `android/app/src/main/java/dev/phylliida/anki/SaveFolderPlugin.java`)
+plugin at `android/app/src/main/java/dev/phylliida/memki/SaveFolderPlugin.java`)
 on Android, `web/fs-access-bridge.js` (File System Access API) on Chrome/Edge,
 or `web/http-bridge.js` (companion server) on Firefox/Safari.
 The save file is the standard `src/backup.js` format (minus media) plus a
