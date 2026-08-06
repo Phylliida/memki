@@ -113,11 +113,19 @@ jobs:
           MEMKI_KEY_PASSWORD: ${{ secrets.MEMKI_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          echo "$MEMKI_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          K="$RUNNER_TEMP/release.keystore"
+          echo "$MEMKI_KEYSTORE_B64" | base64 -d > "$K"
+          # Fail loudly and specifically if the secret is missing/broken:
+          # an empty or truncated MEMKI_KEYSTORE_B64 decodes to a file the
+          # PKCS12 parser rejects with a cryptic DER error downstream.
+          echo "b64 chars: ${#MEMKI_KEYSTORE_B64}, decoded bytes: $(wc -c < "$K")"
+          [ -s "$K" ] || { echo "MEMKI_KEYSTORE_B64 is empty — check the secret name and value"; exit 1; }
+          keytool -list -keystore "$K" -storepass "$MEMKI_KEYSTORE_PASSWORD" \
+            | grep -i "alias\|type" || { echo "keystore unreadable: bad file or wrong MEMKI_KEYSTORE_PASSWORD"; exit 1; }
           OUT="memki-${{ steps.ver.outputs.ver }}.apk"
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$BT/apksigner" sign \
-            --ks "$RUNNER_TEMP/release.keystore" \
+            --ks "$K" \
             --ks-pass "pass:$MEMKI_KEYSTORE_PASSWORD" \
             --ks-key-alias "$MEMKI_KEY_ALIAS" \
             --key-pass "pass:$MEMKI_KEY_PASSWORD" \
