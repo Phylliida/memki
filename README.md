@@ -13,6 +13,15 @@ real Anki collections (`.apkg` / `.colpkg`).
   [`fsrs-rs`](https://github.com/open-spaced-repetition/fsrs-rs), the crate Anki
   itself links against, validated against its golden test vectors.
 
+## Screenshots
+
+<p>
+  <img src="demo/Title%20Screen.jpg" width="230" alt="Deck list with per-deck due counts">
+  <img src="demo/Review%20Screen.jpg" width="230" alt="Reviewing a card (question side)">
+  <img src="demo/Review%20Screen%202.jpg" width="230" alt="Answer side with rendered math and grade buttons">
+  <img src="demo/Edit%20Card%20Screen.jpg" width="230" alt="Add Card editor with live preview">
+</p>
+
 ## Status
 
 A working, local-first Anki: import/create decks, study with FSRS-6 or SM-2, and
@@ -42,6 +51,58 @@ export back to `.apkg`.
 
 Not implemented (by request): AnkiWeb sync, FSRS optimizer, add-ons, TTS.
 
+## Desktop Webui
+
+The whole app runs in a desktop browser with **no build and no npm install** —
+plain ES modules served as static files. All you need is Python 3:
+
+```bash
+python3 web/serve.py        # port 8000
+# then open http://localhost:8000/web/
+```
+
+Custom port: `python3 web/serve.py 8080`. A server is needed at all because
+browsers refuse ES modules on `file://` pages; and prefer `serve.py` over
+`python3 -m http.server`, which lets the browser cache `app.js` and keep
+serving stale code after edits — `serve.py` disables caching.
+
+Where your cards go depends on the browser (detected automatically on first
+launch):
+
+- **Chrome / Edge** — you pick a save folder; the collection lives there as
+  `memki.json` + `memki.media/` (details in *Android app / desktop save file*
+  below).
+- **Firefox / Safari** — no File System Access API, so run the companion file
+  server below for the same save-folder behavior, or let the app fall back to
+  IndexedDB inside the browser profile.
+- Other browsers — IndexedDB.
+
+Everything runs fully offline; there is no account and no network traffic.
+`.apkg` import/export lazily loads vendored sql.js + fflate + fzstd builds
+from `vendor/` (see the import map in `web/index.html`); MathJax is vendored
+there too.
+
+### Firefox / Safari: companion file server
+
+Those browsers don't implement the File System Access API, so they can't
+write a user-chosen folder directly. Run the minimal (~100-line, audit-
+friendly) Flask companion instead — the app detects it automatically:
+
+```bash
+python3 web/file-server.py /path/to/save-folder
+# prints a connect URL like http://127.0.0.1:8787/web/?token=… — open it
+# (serves the app too), or paste it into the app's connect gate when using
+# the hosted site.
+```
+
+It binds to loopback only, requires the per-start token in an `X-Auth`
+header for all `/api/*` calls (so random websites can't talk to it), and
+writes atomically via tmp+rename. Detection order: native app → companion
+server (when paired, or the page is served by it) → File System Access API
+→ IndexedDB fallback. If the token is missing or stale (server restarted),
+the app blocks with a connect gate rather than silently saving to browser
+storage.
+
 ## Formats
 
 **The JSON backup is the native format** — it captures everything, including
@@ -61,42 +122,6 @@ to markdown with turndown — on `.apkg` import and via a one-time migration of
 existing collections on app load — so every note is markdown-mode. (The
 HTML→markdown step is lossy for styled markup like colors and font tags;
 math, `[sound:]`, cloze markers, and image widths are preserved.)
-
-## Run the web app locally
-
-The web app needs no build and no npm install — it is plain ES modules served
-as static files. The only requirement is Python 3 (any static file server
-works, but see the caching note below):
-
-```bash
-python3 web/serve.py        # or: npm run serve — same thing, port 8000
-# then open http://localhost:8000/web/
-```
-
-A custom port: `python3 web/serve.py 8080`.
-
-Why not just double-click `web/index.html`? Browsers refuse to load ES
-modules from `file://` pages, so the app must be served over HTTP. Any
-static server rooted at the repo works, but prefer `web/serve.py` over
-`python3 -m http.server`: the plain server lets browsers cache `app.js`
-heuristically and you end up running stale code after edits; `serve.py`
-disables caching.
-
-Where your cards go depends on the browser (the app detects this
-automatically on first launch):
-
-- **Chrome / Edge** — you pick a save folder; the collection lives there as
-  `memki.json` + `memki.media/` (details in the next section).
-- **Firefox / Safari** — no File System Access API, so either run the
-  companion file server (see *Firefox / Safari: companion file server*
-  below) for the same save-folder behavior, or let the app fall back to
-  IndexedDB storage inside the browser profile.
-- Other browsers — IndexedDB.
-
-Everything runs fully offline; there is no account and no network traffic.
-`.apkg` import/export lazily loads vendored sql.js + fflate + fzstd builds
-from `vendor/` (see the import map in `web/index.html`); MathJax is
-vendored there too.
 
 ## Android app (Capacitor) / desktop save file
 
@@ -120,8 +145,8 @@ the folder; **Backup** writes a fixed-name `memki-backup.json` into it
 out when it's already up to date; **History** shows recent saves/loads. On
 the web, the folder grant may need one click per browser session; browsers
 without the File System Access API (Firefox/Safari) can use the companion
-server below, or IndexedDB. The Android app is fully offline and requests
-no permissions at all.
+server (see *Desktop Webui* above), or IndexedDB. The Android app is fully
+offline and requests no permissions at all.
 
 ```bash
 npm install
@@ -143,28 +168,9 @@ or `web/http-bridge.js` (companion server) on Firefox/Safari.
 The save file is the standard `src/backup.js` format (minus media) plus a
 `history` field, so Backup/Restore stays compatible across platforms.
 
-### Firefox / Safari: companion file server
+## Library usage (npm)
 
-Those browsers don't implement the File System Access API, so they can't
-write a user-chosen folder directly. Run the minimal (~100-line, audit-
-friendly) Flask companion instead — the app detects it automatically:
-
-```bash
-python3 web/file-server.py /path/to/save-folder
-# prints a connect URL like http://127.0.0.1:8787/web/?token=… — open it
-# (serves the app too), or paste it into the app's connect gate when using
-# the hosted site.
-```
-
-It binds to loopback only, requires the per-start token in an `X-Auth`
-header for all `/api/*` calls (so random websites can't talk to it), and
-writes atomically via tmp+rename. Detection order: native app → companion
-server (when paired, or the page is served by it) → File System Access API
-→ IndexedDB fallback. If the token is missing or stale (server restarted),
-the app blocks with a connect gate rather than silently saving to browser
-storage.
-
-## Usage
+The scheduling core is also a plain JS library:
 
 ```js
 import { FSRS, Rating } from "memki/fsrs";

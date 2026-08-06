@@ -1497,6 +1497,7 @@ async function renderAddCard() {
     const note = addNoteWithCards(model, fields, Number(deckSel.value),
       [...newTags].sort((a, b) => a.localeCompare(b)));
     state.col.conf.curDeck = Number(deckSel.value); // default deck for the next card
+    state.col.conf.curModel = model.id; // default note type too (rapid multi-add)
     // The field align/size styles become the note's own data.
     const s = state.col.conf.addFieldStyle;
     if (s?.falign || s?.fsize) {
