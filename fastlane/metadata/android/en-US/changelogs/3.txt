@@ -1,0 +1,1 @@
+Add Card now autosaves an in-progress draft (restored if you navigate away), and remembers the last-used note type. README gained screenshots and a proper Desktop Webui section.
