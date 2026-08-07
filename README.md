@@ -53,55 +53,33 @@ Not implemented (by request): AnkiWeb sync, FSRS optimizer, add-ons, TTS.
 
 ## Desktop Webui
 
-The whole app runs in a desktop browser with **no build and no npm install** —
-plain ES modules served as static files. All you need is Python 3:
+One command, no build, no npm — just Python 3 with Flask (`pip install flask`):
 
 ```bash
-python3 web/serve.py        # port 8000
-# then open http://localhost:8000/web/
+python3 web/file-server.py
 ```
 
-Custom port: `python3 web/serve.py 8080`. A server is needed at all because
-browsers refuse ES modules on `file://` pages; and prefer `serve.py` over
-`python3 -m http.server`, which lets the browser cache `app.js` and keep
-serving stale code after edits — `serve.py` disables caching.
+It prints a single URL — open it. That same command also serves the app,
+and your collection lives in a save folder (default `./save`, or pass a
+path: `python3 web/file-server.py /path/to/folder`) as `memki.json` +
+`memki.media/` — point Syncthing & co. at it and your devices stay in
+step. Works in every browser, Firefox and Safari included.
 
-Where your cards go depends on the browser (detected automatically on first
-launch):
+The server binds to loopback only and requires the token from the printed
+URL for all API calls (so random websites can't talk to it), and writes
+atomically via tmp+rename. If the token is missing or stale, the app
+blocks with a connect gate rather than silently saving elsewhere.
 
-- **Chrome / Edge** — you pick a save folder; the collection lives there as
-  `memki.json` + `memki.media/` (details in *Android app / desktop save file*
-  below).
-- **Firefox / Safari** — no File System Access API, so run the companion file
-  server below for the same save-folder behavior, or let the app fall back to
-  IndexedDB inside the browser profile.
-- Other browsers — IndexedDB.
+Don't even want the Flask dependency? `python3 web/serve.py` is a
+zero-dependency static server — open `http://localhost:8000/web/`.
+Chrome/Edge still get the save folder (via the File System Access API,
+one click per browser session); other browsers fall back to IndexedDB
+storage in the browser profile.
 
 Everything runs fully offline; there is no account and no network traffic.
 `.apkg` import/export lazily loads vendored sql.js + fflate + fzstd builds
-from `vendor/` (see the import map in `web/index.html`); MathJax is vendored
-there too.
-
-### Firefox / Safari: companion file server
-
-Those browsers don't implement the File System Access API, so they can't
-write a user-chosen folder directly. Run the minimal (~100-line, audit-
-friendly) Flask companion instead — the app detects it automatically:
-
-```bash
-python3 web/file-server.py /path/to/save-folder
-# prints a connect URL like http://127.0.0.1:8787/web/?token=… — open it
-# (serves the app too), or paste it into the app's connect gate when using
-# the hosted site.
-```
-
-It binds to loopback only, requires the per-start token in an `X-Auth`
-header for all `/api/*` calls (so random websites can't talk to it), and
-writes atomically via tmp+rename. Detection order: native app → companion
-server (when paired, or the page is served by it) → File System Access API
-→ IndexedDB fallback. If the token is missing or stale (server restarted),
-the app blocks with a connect gate rather than silently saving to browser
-storage.
+from `vendor/` (see the import map in `web/index.html`); MathJax is
+vendored there too.
 
 ## Formats
 

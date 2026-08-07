@@ -1391,8 +1391,10 @@ async function renderAddCard() {
   modelSel.value = validModelId(state.col.conf.curModel);
   if (draft && models.some((m) => m.id === draft.mid)) modelSel.value = String(draft.mid);
   const deckSel = el("select", {}, ...decks.map((d) => el("option", { value: d.id }, d.name)));
-  // Default to the deck the last card was added to (Anki's curDeck).
+  // Default deck: the one being studied right now, else the last card's
+  // deck (Anki's curDeck). A saved draft wins over both.
   if (decks.some((d) => d.id === state.col.conf.curDeck)) deckSel.value = String(state.col.conf.curDeck);
+  if (state.deckId && decks.some((d) => d.id === state.deckId)) deckSel.value = String(state.deckId);
   if (draft && decks.some((d) => d.id === draft.did)) deckSel.value = String(draft.did);
 
   // Top-right actions: tag + flag toggles for the new note, then Save.

@@ -13,3 +13,4 @@ node_modules/
 dist/
 tmp/
 web/.file-server-state.json
+__pycache__/

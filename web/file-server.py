@@ -33,12 +33,13 @@ Security notes (deliberately simple, please audit):
 
 import base64
 import json
+import logging
 import os
 import secrets
 import sys
 from pathlib import Path
 
-from flask import Flask, jsonify, request
+from flask import Flask, cli, jsonify, request
 
 # The chosen save folder and the auth token are remembered here (gitignored)
 # so they survive restarts; a CLI arg overrides the folder (and becomes the
@@ -204,6 +205,9 @@ def migrate(root):
 
 if __name__ == "__main__":
     migrate(ROOT)
-    print(f"Memki save folder: {ROOT}")
-    print(f"connect URL: http://127.0.0.1:{PORT}/web/?token={TOKEN}")
+    # The one printed line is the whole UI — copy-paste it into a browser.
+    # Silence Flask's startup banner and werkzeug's request logs.
+    logging.getLogger("werkzeug").disabled = True
+    cli.show_server_banner = lambda *args, **kwargs: None
+    print(f"http://127.0.0.1:{PORT}/web/?token={TOKEN}", flush=True)
     app.run(host="127.0.0.1", port=PORT)

@@ -1,0 +1,1 @@
+Add Card preselects the deck you're reviewing and autosaves drafts; the local desktop server now starts with one quiet command that prints just the URL to open.
