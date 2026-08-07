@@ -83,12 +83,15 @@ jobs:
         if: steps.gate.outputs.skip == 'false'
         run: bash scripts/build-capacitor.sh
 
+      # JDK 21: F-Droid's buildserver builds with openjdk-21, and D8/baseline
+      # profiles differ between JDK majors — the JDK must match or
+      # reproducible-builds verification fails on classes.dex.
       - name: Setup JDK
         if: steps.gate.outputs.skip == 'false'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Sync Capacitor
         if: steps.gate.outputs.skip == 'false'
