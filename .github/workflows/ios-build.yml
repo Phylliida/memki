@@ -12,8 +12,16 @@
 #
 # Unlike the creature-collect workflow this is derived from, anki
 # needs none of the LocalServer/GCDWebServer Swift overrides (no
-# service worker), no plugin patching, and no bundled-data rsync
-# repair — the webDir is plain static files.
+# service worker) and no pod patching — the webDir is plain static
+# files. It DOES need two pieces of the same machinery:
+#
+#   - ios-overrides/SaveFolderPlugin.swift — iOS port of the Android
+#     SaveFolder plugin (user-picked sync folder holding memki.json),
+#     injected into the Xcode project after `cap add ios`.
+#   - the dist/ → public/ rsync repair, because `cap sync` on iOS drops
+#     directories named `icons/` or `fonts/` at any depth, and our
+#     webDir contains vendor/mathjax/output/chtml/fonts/woff-v2/*.woff
+#     (without it math renders in fallback fonts).
 #
 # Trigger: manual (workflow_dispatch) so you control when builds
 # happen — and a path-filtered push so deploys to main of relevant
@@ -30,6 +38,7 @@ on:
       - 'src/**'
       - 'vendor/**'
       - 'assets/**'
+      - 'ios-overrides/**'
       - 'scripts/build-capacitor.sh'
       - 'capacitor.config.json'
       - 'package.json'
@@ -76,6 +85,33 @@ jobs:
             npx cap add ios
           fi
           npx cap sync ios
+          # `cap sync` drops directories named `icons/` and `fonts/`
+          # at every depth in the webDir copy — historical Capacitor
+          # iOS sync behavior tied to app-icon / font asset conflicts.
+          # Symptom: vendor/mathjax/output/chtml/fonts/woff-v2/*.woff
+          # is missing in App.app/public/, so MathJax CHTML falls back
+          # to system fonts. Forcibly re-copy dist/ over public/ via
+          # rsync to restore what cap sync stripped. cordova.js (added
+          # by cap sync, not in dist/) is preserved because rsync
+          # without --delete only adds/overwrites.
+          echo "── re-syncing dist/ → ios/App/App/public/ ──"
+          rsync -a dist/ ios/App/App/public/
+          n=$(find ios/App/App/public/vendor/mathjax/output/chtml/fonts -type f 2>/dev/null | wc -l)
+          echo "  mathjax chtml fonts: $n files"
+          if [ "$n" -eq 0 ]; then
+            echo "ERROR: mathjax fonts missing after rsync repair"
+            exit 1
+          fi
+
+      # Wire in the SaveFolder plugin (iOS port of the Android plugin
+      # the web side talks to via web/native-bridge.js). Capacitor 6
+      # auto-registers CAPBridgedPlugin classes compiled into the App
+      # target; inject-into-xcodeproj.rb adds the file to the target so
+      # xcodebuild compiles it. No extra pods → no second pod install.
+      - name: Inject SaveFolder Swift plugin
+        run: |
+          cp ios-overrides/SaveFolderPlugin.swift ios/App/App/SaveFolderPlugin.swift
+          ruby ios-overrides/inject-into-xcodeproj.rb
 
       # Set the app icon from assets/icon-only.png (rendered from
       # assets/icon/icon-foreground.svg at 1024px). @capacitor/assets

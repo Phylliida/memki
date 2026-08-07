@@ -20,7 +20,13 @@ using something like [SyncThings](https://syncthing.net/) to sync between Mobile
 
 ## Mobile App
 
-The android apk is available in the Releases tab, and soon on various android stores. iOS is coming soon.
+The android apk is available in the Releases tab, and soon on various android stores.
+
+For iOS, an unsigned IPA is built by the `ios-build.yml` GitHub Actions
+workflow (artifact `oss-anki-ipa`); run `./install-ipa.sh` to download it
+and sideload it onto your iPhone via SideStore or AltServer-Linux — the
+sideloading tool re-signs it with your Apple ID at install time, so no
+paid Apple Developer account is needed.
 
 ## Desktop App
 

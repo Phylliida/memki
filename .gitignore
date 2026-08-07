@@ -12,5 +12,6 @@ node_modules/
 .DS_Store
 dist/
 tmp/
+ios/
 web/.file-server-state.json
 __pycache__/
