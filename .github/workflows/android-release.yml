@@ -123,7 +123,12 @@ jobs:
           keytool -list -keystore "$K" -storepass "$MEMKI_KEYSTORE_PASSWORD" \
             | grep -i "alias\|type" || { echo "keystore unreadable: bad file or wrong MEMKI_KEYSTORE_PASSWORD"; exit 1; }
           OUT="memki-${{ steps.ver.outputs.ver }}.apk"
-          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          # Pin apksigner to build-tools 34.0.0: 35+ realigns ZIP entries
+          # (16KB page support, 0xd935 extra fields) while signing, which
+          # makes the signed APK differ from F-Droid's unsigned build and
+          # breaks reproducible-builds verification.
+          BT="$ANDROID_HOME/build-tools/34.0.0"
+          [ -x "$BT/apksigner" ] || { echo "build-tools 34.0.0 apksigner not found"; exit 1; }
           "$BT/apksigner" sign \
             --ks "$K" \
             --ks-pass "pass:$MEMKI_KEYSTORE_PASSWORD" \
