@@ -833,7 +833,29 @@ function cardFace(html) {
  *  Defaults to the current view; previews render outside #view, so pass
  *  their container. */
 function typesetMath(node = view()) {
-  if (window.MathJax?.typesetPromise) window.MathJax.typesetPromise([node]).catch(() => {});
+  return window.MathJax?.typesetPromise
+    ? window.MathJax.typesetPromise([node]).catch(() => {})
+    : Promise.resolve();
+}
+
+/** Replace a preview box's content and typeset it, holding the box's current
+ *  height as a min-height until MathJax settles. Long equations swing the
+ *  preview between tall raw-TeX text and the typeset result on every
+ *  keystroke; without this seatbelt the transient collapse makes the browser
+ *  lose the scroll position of the surrounding page/pane. The final height
+ *  still tracks the content — the box can grow freely and only shrinks once,
+ *  after the new content is fully typeset. */
+async function steadyPreview(box, fill) {
+  // Note: no isConnected gate here — the Add screen's first paint fills its
+  // preview before the form is attached (a detached box reads offsetHeight 0,
+  // which is a harmless min-height). Callers that need the gate keep it
+  // inside `fill`.
+  box.style.minHeight = `${box.offsetHeight}px`;
+  try {
+    await fill();
+  } finally {
+    box.style.minHeight = "";
+  }
 }
 
 // --- formatting ---
@@ -1439,7 +1461,7 @@ async function renderAddCard() {
 
   // Live preview: the actual card(s) this note will create, as you type.
   const previewBox = el("div", { class: "preview-box" });
-  const updatePreview = async () => {
+  const updatePreview = () => steadyPreview(previewBox, async () => {
     const model = state.col.noteType(Number(modelSel.value)) ?? models[0];
     if (!model) { previewBox.replaceChildren(); return; }
     const fields = inputs.map((ed) => ed.getText());
@@ -1463,8 +1485,8 @@ async function renderAddCard() {
       ),
     );
     wireSoundVolumes(previewBox);
-    typesetMath();
-  };
+    await typesetMath(previewBox); // scoped to the preview, not the whole view
+  });
   // Draft autosave: every edit persists the form to IndexedDB (debounced), so
   // an accidental Back / crash / tab close can't lose work. A fully-empty
   // draft deletes itself. Switching note type deliberately does NOT save —
@@ -2255,7 +2277,7 @@ function noteEditorForm(noteId, cb = {}) {
   // real pipeline, below the fields (beside them on wide screens in the
   // browse pane), updated as you type.
   const pvBox = el("div", { class: "ne-pv" });
-  const updatePvPop = async () => {
+  const updatePvPop = () => steadyPreview(pvBox, async () => {
     if (!pvBox.isConnected) return; // editor closed/replaced meanwhile
     if (model.ossIO) {
       // Image occlusion notes render their own face (fields are image + mask
@@ -2285,8 +2307,8 @@ function noteEditorForm(noteId, cb = {}) {
       el("div", { class: "card-face pv" }, el("div", { class: "card", html: displayHtml(answer) })),
     );
     wireSoundVolumes(pvBox);
-    typesetMath(pvBox);
-  };
+    await typesetMath(pvBox);
+  });
   const schedulePvPop = debounced(updatePvPop);
   // First paint: run after the caller has attached the form (MathJax and
   // media sizing need layout).
