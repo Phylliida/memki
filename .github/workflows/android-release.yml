@@ -136,10 +136,13 @@ jobs:
 
       # Creates the tag too when it doesn't exist yet (at --target); with
       # an existing tag (e.g. v1.0.5) the release simply uses it.
+      # NOTE: block scalar (|) — a plain scalar folds newlines into spaces
+      # and breaks the shell line-continuations.
       - name: Publish GitHub Release (+ tag if needed)
         if: steps.gate.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "v${{ steps.ver.outputs.ver }}" "${{ steps.sign.outputs.apk }}" \
-          --title "v${{ steps.ver.outputs.ver }}" --generate-notes \
-          --target "${{ github.sha }}"
+        run: |
+          gh release create "v${{ steps.ver.outputs.ver }}" "${{ steps.sign.outputs.apk }}" \
+            --title "v${{ steps.ver.outputs.ver }}" --generate-notes \
+            --target "${{ github.sha }}"
