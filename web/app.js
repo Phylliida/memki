@@ -25,6 +25,16 @@ import {
 
 const SQL_CDN = new URL("../vendor/sqljs/", import.meta.url).href;
 
+// Scroll is the user's alone: focusing an element (programmatically — modal
+// inputs, editor caret restores, MathJax's menus, anything) must never move
+// the page. Native tap-to-focus doesn't go through .focus() and still works.
+// (Selection/caret moves can also scroll; the markdown editor pins those
+// with keepScroll.)
+const nativeFocus = HTMLElement.prototype.focus;
+HTMLElement.prototype.focus = function (opts) {
+  nativeFocus.call(this, { preventScroll: true, ...opts });
+};
+
 const state = {
   db: null,
   col: null,
@@ -420,7 +430,7 @@ function mdEditor(initial = "", { afterHistory = null } = {}) {
     const { src, caret } = hist.stack[j];
     render(src);
     keepScroll(area, () => {
-      area.focus({ preventScroll: true });
+      area.focus();
       restoreCaret(Math.min(caret, src.length));
     });
     area.dispatchEvent(new Event("input", { bubbles: true })); // autosave/preview
@@ -433,7 +443,7 @@ function mdEditor(initial = "", { afterHistory = null } = {}) {
     render(src);
     if (caret != null) {
       keepScroll(area, () => {
-        area.focus({ preventScroll: true });
+        area.focus();
         restoreCaret(caret);
       });
     }
@@ -479,7 +489,7 @@ function mdEditor(initial = "", { afterHistory = null } = {}) {
     const inner = src.slice(s, e);
     setSource(src.slice(0, s) + pre + inner + post + src.slice(e));
     keepScroll(area, () => {
-      area.focus({ preventScroll: true });
+      area.focus();
       setDomSelection(s, e + pre.length + post.length); // show what was wrapped
     });
   };
