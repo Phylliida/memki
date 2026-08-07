@@ -1,17 +1,14 @@
 # Memki
 
-Open-source, framework-free implementation of [Anki](https://apps.ankiweb.net/):
-a precise spaced-repetition core with the goal of **full round-trip interop** with
-real Anki collections (`.apkg` / `.colpkg`).
+Memki is an open-source, self-hosted MIT Licened implementation of spaced repetition,
+with an emphasis on feature parity with Anki (including a faithful implementation of FSRS).
+You can import and export .apkg and continue where you left off,
+create decks, browse cards and create filtered decks, etc.,
+all implemented in vanilla js with zero runtime dependencies.
 
-- **Vanilla** — plain ES modules, no framework, no build step. The scheduling
-  core has **zero runtime dependencies**.
-- **Local-first** — your collection lives in a save folder you choose (single
-  JSON + media files) on Android and desktop browsers; IndexedDB is the
-  plain-browser fallback.
-- **Precise** — the FSRS-6 scheduler is a faithful port of
-  [`fsrs-rs`](https://github.com/open-spaced-repetition/fsrs-rs), the crate Anki
-  itself links against, validated against its golden test vectors.
+Memki is local first, Desktop mode and the app both store to a folder. I recommend
+using something like [SyncThings](https://syncthing.net/) to sync that folder,
+so Desktop and Mobile stay in sync.
 
 ## Screenshots
 
@@ -22,129 +19,48 @@ real Anki collections (`.apkg` / `.colpkg`).
   <img src="demo/Edit%20Card%20Screen.jpg" width="230" alt="Add Card editor with live preview">
 </p>
 
-## Status
+## Mobile App
 
-A working, local-first Anki: import/create decks, study with FSRS-6 or SM-2, and
-export back to `.apkg`.
+The android apk is available in the Releases tab, and soon on various android stores. iOS is coming soon.
 
-| Area | State |
-|---|---|
-| FSRS-6 memory model (`src/fsrs.js`) | ✅ matches fsrs-rs golden vectors |
-| Data model (col/notes/cards/revlog/decks/models) | ✅ schema-v11; csum/base91/GUID match rslib |
-| `.apkg` / `.colpkg` import + export | ✅ legacy **and modern (schema-18) packages**; import adds decks (notes dedup by GUID, decks match by name). Export is a **lossy compatibility snapshot** — see Formats |
-| JSON backup / restore | ✅ one-file backup of collection + media — **the native format** |
-| Sync merge engine | ✅ static-file sync core: deterministic, order-insensitive merge (revlog unions, notes by GUID, cards by note/deck/ord, delete-wins) |
-| CSV / TSV import | ✅ via the header Import button (or direct screen): delimiter detect, header, column→field mapping |
-| Markdown field editor (`src/markdown.js`) | ✅ fields are **markdown** (CommonMark + GFM, vendored marked — offline, no build). Media tokens are inline widgets: resizable images (`{width=N}`), audio/video players with volume; drag-drop / paste media; cloze shortcut; own **undo/redo** stack (Ctrl+Z / Ctrl+Shift+Z, toolbar ↶ ↷). LaTeX in `$…$` / `$$…$$` / `\(...\)` / `\[...\]` / `[latex]` (MathJax at render; `$` normalized to `\(` so Anki understands it too). Fenced code blocks are **syntax-highlighted** (vendored highlight.js, 192 languages). Legacy HTML fields pass through untouched |
-| Day rollover | ✅ local days, configurable rollover hour (default 4 AM), creationOffset |
-| Stock note types | ✅ Basic, and-reversed, optional-reversed, type-in, Cloze; conditional card generation |
-| Scheduler (v3: SM-2 + FSRS, fuzz, daily limits, burying, learn-ahead) | ✅ matches rslib state-machine + fuzz vectors |
-| Template renderer (fields, conditionals, **cloze**, **type-in**, MathJax) | ✅ |
-| IndexedDB persistence | ✅ whole-collection + incremental card/revlog/media |
-| Browser study UI (`web/`) | ✅ study (keyboard shortcuts, audio/video, note-type CSS, **undo**) |
-| Browse (Anki search syntax) / edit / delete + deck management | ✅ `deck:`/`tag:`/`is:`/`prop:`/`-`/`or`; edit notes (tag chips, flag toggles); deck tree |
-| Card operations | ✅ suspend, bury, flag, forget, set due date, move deck (browser + review) |
-| Deck options UI | ✅ steps, limits, intervals, ease, leech, easy days (load balancing), FSRS retention/params |
-| Note-type / template editor | ✅ fields (add/remove/rename), templates, CSS, with note/card migration |
-| Filtered decks + custom study | ✅ build/empty (odid/odue), review-ahead / all / search presets |
-| Statistics | ✅ counts, retention, review history + due forecast |
+## Desktop App
 
-Not implemented (by request): AnkiWeb sync, FSRS optimizer, add-ons, TTS.
+There is a simple webui, the only dependencies are python+flask. Simply run
 
-## Desktop Webui
-
-One command, no build, no npm — just Python 3 with Flask (`pip install flask`):
-
-```bash
-python3 web/file-server.py
+```
+git clone https://github.com/Phylliida/memki.git
+cd memki
 ```
 
-It prints a single URL — open it. That same command also serves the app,
-and your collection lives in a save folder (default `./save`, or pass a
-path: `python3 web/file-server.py /path/to/folder`) as `memki.json` +
-`memki.media/` — point Syncthing & co. at it and your devices stay in
-step. Works in every browser, Firefox and Safari included.
+Now you have the desktop app downloaded, you can run
 
-The server binds to loopback only and requires the token from the printed
-URL for all API calls (so random websites can't talk to it), and writes
-atomically via tmp+rename. If the token is missing or stale, the app
-blocks with a connect gate rather than silently saving elsewhere.
-
-Don't even want the Flask dependency? `python3 web/serve.py` is a
-zero-dependency static server — open `http://localhost:8000/web/`.
-Chrome/Edge still get the save folder (via the File System Access API,
-one click per browser session); other browsers fall back to IndexedDB
-storage in the browser profile.
-
-Everything runs fully offline; there is no account and no network traffic.
-`.apkg` import/export lazily loads vendored sql.js + fflate + fzstd builds
-from `vendor/` (see the import map in `web/index.html`); MathJax is
-vendored there too.
-
-## Formats
-
-**The JSON backup is the native format** — it captures everything, including
-the parts of our model that Anki's cannot express: notes living in multiple
-decks and per-deck scheduling memory. Flags are exclusive (0–7), exactly like
-Anki. **`.apkg` export is a lossy compatibility snapshot** for moving cards
-into Anki: the per-deck memory rides opaquely in `notes.data`, and legacy
-multi-flag cards (from before flags became exclusive) degrade to their lowest
-flag. Prefer JSON for backups and device-to-device transfer; use `.apkg` to
-share decks with Anki users.
-
-**Fields are markdown source.** Cards render them through marked (with math,
-`[sound:]`, and image `{width=N}` extensions) at display time, and `.apkg`
-export converts every field to HTML with recomputed `sfld`/`csum`, so Anki
-receives its native format. In the other direction, HTML fields are converted
-to markdown with turndown — on `.apkg` import and via a one-time migration of
-existing collections on app load — so every note is markdown-mode. (The
-HTML→markdown step is lossy for styled markup like colors and font tags;
-math, `[sound:]`, cloze markers, and image widths are preserved.)
-
-## Android app (Capacitor) / desktop save file
-
-The same web app also runs as an Android app (Capacitor 6), and in desktop
-Chrome/Edge it can use the same file-backed storage via the File System
-Access API. In both, persistence switches from IndexedDB to a **save folder
-you choose**: on first launch you're asked to pick a folder (SAF picker on
-Android, directory picker on the web), and the collection lives there as
-`memki.json` — read at startup and rewritten (debounced, atomic
-tmp+rename) as you study and edit. **Media is NOT in the JSON**: images and
-audio are individual files in an `memki.media/` subfolder, written when
-added and fetched lazily when displayed, so reviewing a card only rewrites
-the small text JSON even for huge media libraries. (Save files from before
-the split are migrated on first load.)
-
-Point a sync tool like Syncthing at that folder to keep devices in sync;
-while the app is open a 3-second poll picks up external changes
-(last-writer-wins, no merge). The header's **Folder** button shows/changes
-the folder; **Backup** writes a fixed-name `memki-backup.json` into it
-(also refreshed automatically every 15 min and on backgrounding) and greys
-out when it's already up to date; **History** shows recent saves/loads. On
-the web, the folder grant may need one click per browser session; browsers
-without the File System Access API (Firefox/Safari) can use the companion
-server (see *Desktop Webui* above), or IndexedDB. The Android app is fully
-offline and requests no permissions at all.
-
-```bash
-npm install
-npm run build:android   # assembles dist/ (scripts/build-capacitor.sh) + npx cap sync
-# then open android/ in Android Studio, or: cd android && ./gradlew assembleDebug
+```
+python web/file-server.py
 ```
 
-An iOS IPA is built by CI (`.github/workflows/ios-build.yml`); `install-ipa.sh`
-downloads the latest artifact and can sideload it via AltServer.
+It will print out a link like
 
-How it fits together: `web/storage.js` picks the backend at runtime —
-IndexedDB (`src/storage.js`) in plain browsers, or `web/storage-file.js`
-(same function surface over the save folder) on Android, when
-`showOpenFilePicker` exists, or when the companion server is reachable.
-The bridge behind it is `web/native-bridge.js` (talking to the `SaveFolder`
-plugin at `android/app/src/main/java/dev/phylliida/memki/SaveFolderPlugin.java`)
-on Android, `web/fs-access-bridge.js` (File System Access API) on Chrome/Edge,
-or `web/http-bridge.js` (companion server) on Firefox/Safari.
-The save file is the standard `src/backup.js` format (minus media) plus a
-`history` field, so Backup/Restore stays compatible across platforms.
+```
+http://127.0.0.1:8787/web/?token=zS_ABCuDDBnsjsjaaFFAF
+```
+
+paste that in your browser to open the desktop app.
+
+You can click on the path at the top to change the directory your files are stored in,
+ideally pick a directory you're synchronizing with mobile via [SyncThings](https://syncthing.net/).
+I recommend turning on versioning in SyncThings to help avoid accidental data loss by you accidentally deleting a file.
+
+## Divergences from Anki
+
+Your notes are stored in markdown (with a few extra features like left/center/right alignment and font size),
+instead of the html Anki uses. Decks are auto-converted to markdown on import, and converted back to html on apkg export.
+
+This should rarely matter in practice, but if you notice certain cases where the conversion is failing to faithfully
+represent the notes feel free to make a PR or Issue and we can look into it.
+
+Instead of having a database file, we simply have a `memki.media` folder that contains all the media, and a `memki.json`
+that contains all card and deck metadata. This ensures we can write the .json very frequently (automatically) because it has no heavy media.
+You can still export any deck to an .apkg compatible with Anki by going into that deck's settings.
 
 ## Library usage (npm)
 
@@ -172,7 +88,7 @@ scheduler layer that sits on top of it — see [`docs/FSRS6.md`](docs/FSRS6.md).
 ## Develop
 
 ```bash
-npm test   # node --test, no dependencies required
+npm test   # node --test
 ```
 
 ## License
