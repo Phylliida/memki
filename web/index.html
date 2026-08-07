@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <!-- interactive-widget=overlays-content: the on-screen keyboard overlays the
+       page instead of resizing the viewport (Chrome Android 108+), so opening
+       the keyboard never reflows or re-scrolls the page — scroll stays where
+       the user put it. Desktop and unsupported browsers ignore the token. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=overlays-content" />
   <meta name="theme-color" content="#191817" />
   <!-- Restore the saved theme before first paint (kept in sync by app.js). -->
   <script>
