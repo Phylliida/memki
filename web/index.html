@@ -30,7 +30,14 @@
   <!-- MathJax for \( \) / \[ \] (all math syntaxes normalized by src/mathify.js). -->
   <script>
     window.MathJax = {
-      chtml: { fontURL: "../vendor/mathjax/output/chtml/fonts/woff-v2" },
+      chtml: {
+        fontURL: "../vendor/mathjax/output/chtml/fonts/woff-v2",
+        // Wrap over-wide equations to the container instead of overflowing
+        // the card: break at TeX-style breakpoints (relations, operators).
+        // Unbreakable constructs (\left..\right fences, matrices) can still
+        // overflow — styles.css gives those a local scrollbar as a fallback.
+        linebreaks: { inline: true, display: true },
+      },
       tex: { inlineMath: [["\\(", "\\)"]], displayMath: [["\\[", "\\]"]] },
       options: { skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"] },
       startup: { typeset: false },

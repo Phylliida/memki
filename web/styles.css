@@ -169,6 +169,10 @@ button.icon:hover { border-color: var(--border); }
 }
 .card-face img { max-width: 100%; height: auto; }
 .card-face .av { display: block; margin: 14px auto; max-width: 100%; }
+/* MathJax linebreaks (see index.html) wrap most over-wide equations; the ones
+   that can't break (huge \left..\right, matrices) scroll within themselves
+   instead of stretching the card and the page around it. */
+.card-face mjx-container[display="true"] { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
 /* Code blocks stay left-aligned even though card text defaults to centered. */
 .card-face pre { text-align: left; }
 /* The inner .card carries the note type's own (scoped) CSS; the theme sets
