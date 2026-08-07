@@ -6,9 +6,8 @@ You can import and export .apkg and continue where you left off,
 create decks, browse cards and create filtered decks, etc.,
 all implemented in vanilla js with zero runtime dependencies.
 
-Memki is local first, Desktop mode and the app both store to a folder. I recommend
-using something like [SyncThings](https://syncthing.net/) to sync that folder,
-so Desktop and Mobile stay in sync.
+Desktop Mode and the Mobile App both store to a folder you pick. I recommend
+using something like [SyncThings](https://syncthing.net/) to sync between Mobile and Desktop.
 
 ## Screenshots
 
