@@ -60,6 +60,25 @@ function show(...nodes) {
   v.replaceChildren(...nodes);
 }
 
+/** Run fn() without letting it change any scroll position. Focusing a
+ *  contenteditable and moving its caret make the browser scroll the element
+ *  or caret into view — which yanks the page (or the browse pane, its own
+ *  scroller) around on undo/toolbar actions. This pins the window and every
+ *  ancestor scroller for the duration, re-asserting once more on the next
+ *  frame in case the browser applied a scroll asynchronously. */
+function keepScroll(el, fn) {
+  const pinned = [];
+  for (let n = el; n; n = n.parentElement) pinned.push([n, n.scrollTop, n.scrollLeft]);
+  const wx = window.scrollX, wy = window.scrollY;
+  const restore = () => {
+    for (const [n, t, l] of pinned) { n.scrollTop = t; n.scrollLeft = l; }
+    window.scrollTo(wx, wy);
+  };
+  fn();
+  restore();
+  requestAnimationFrame(restore);
+}
+
 // Highlight the header button of the current view (null clears all).
 function setActiveNav(id) {
   document.querySelectorAll(".actions button").forEach((b) =>
@@ -400,8 +419,10 @@ function mdEditor(initial = "", { afterHistory = null } = {}) {
     hist.i = j;
     const { src, caret } = hist.stack[j];
     render(src);
-    area.focus();
-    restoreCaret(Math.min(caret, src.length));
+    keepScroll(area, () => {
+      area.focus({ preventScroll: true });
+      restoreCaret(Math.min(caret, src.length));
+    });
     area.dispatchEvent(new Event("input", { bubbles: true })); // autosave/preview
     updateUndoButtons();
   };
@@ -410,7 +431,12 @@ function mdEditor(initial = "", { afterHistory = null } = {}) {
   const setSource = (src, caret = null, { record = true } = {}) => {
     if (record) commitHistory(); // flush the pre-action state (incl. pending typing)
     render(src);
-    if (caret != null) { area.focus(); restoreCaret(caret); }
+    if (caret != null) {
+      keepScroll(area, () => {
+        area.focus({ preventScroll: true });
+        restoreCaret(caret);
+      });
+    }
     if (record) commitHistory(); // and the post-action state as its own step
     area.dispatchEvent(new Event("input", { bubbles: true }));
   };
@@ -430,7 +456,7 @@ function mdEditor(initial = "", { afterHistory = null } = {}) {
     if (cur.join("\x1f") === want.join("\x1f")) return; // token set unchanged
     const sel = selOffsets();
     render(src);
-    if (sel) restoreCaret(sel[0]);
+    if (sel) keepScroll(area, () => restoreCaret(sel[0]));
   };
   const scheduleRetokenize = debounced(retokenize, 250);
   area.addEventListener("input", (e) => {
@@ -452,8 +478,10 @@ function mdEditor(initial = "", { afterHistory = null } = {}) {
     const [s, e] = sel;
     const inner = src.slice(s, e);
     setSource(src.slice(0, s) + pre + inner + post + src.slice(e));
-    area.focus();
-    setDomSelection(s, e + pre.length + post.length); // show what was wrapped
+    keepScroll(area, () => {
+      area.focus({ preventScroll: true });
+      setDomSelection(s, e + pre.length + post.length); // show what was wrapped
+    });
   };
 
   const linePrefix = (mk) => {
