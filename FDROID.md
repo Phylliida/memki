@@ -202,6 +202,19 @@ JAVA_HOME=<jdk-21> ../fdroidenv/bin/fdroid lint dev.phylliida.memki
 JAVA_HOME=<jdk-21> ../fdroidenv/bin/fdroid build -t -v --no-tarball dev.phylliida.memki
 ```
 
+NixOS local-run notes (all three bit us on the 1.0.7 verify):
+
+- `JAVA_HOME` must be a nix-store JDK (the config's `java_paths` entry);
+  an extracted temurin tarball won't exec on NixOS.
+- Put `$JAVA_HOME/bin` on `PATH` too — fdroid's apksigner wrapper script
+  does `exec java` at the signature-verify step and fails with
+  `exec: java: not found` otherwise.
+- `~/.gradle/gradle.properties` needs
+  `android.aapt2FromMavenOverride=<sdk>/build-tools/34.0.0/aapt2`, or AGP
+  runs the maven-cached aapt2 which dies with `Exec failed, error: 2`
+  (no ELF interpreter). Agent sessions sandbox `~/.gradle` and wipe it on
+  exit — recreate this file at the start of any session that builds.
+
 `fdroid build` clones from GitHub at the pinned hash; to test an unpushed
 commit, seed its clone first:
 `cd build/dev.phylliida.memki && git fetch /path/to/local/repo main`.
