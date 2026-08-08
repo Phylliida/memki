@@ -53,6 +53,13 @@
 
 * { box-sizing: border-box; }
 
+/* The page never grows wider than the viewport: horizontal overflow breaks
+   MathJax's line-wrap width measurement and makes mobile WebViews jump the
+   scroll when the keyboard opens. Content that can't shrink is clipped (or
+   scrolls locally, like display math), never stretches the page. `hidden`
+   for older engines, `clip` (no scroll container created) where supported. */
+html, body { overflow-x: hidden; overflow-x: clip; }
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;

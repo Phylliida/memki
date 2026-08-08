@@ -14,7 +14,7 @@ at runtime, no build step). Imported via relative paths from `src/`.
 | `fflate.esm.js` | [fflate](https://github.com/101arrowz/fflate) (`esm/browser.js`) | 0.8.3 | MIT | `https://cdn.jsdelivr.net/npm/fflate@0.8.3/+esm` |
 | `fzstd.esm.js` | [fzstd](https://github.com/101arrowz/fzstd) (`esm/index.mjs`) | 0.1.1 | MIT | `https://cdn.jsdelivr.net/npm/fzstd@0.1.1/+esm` |
 | `sqljs/` | [sql.js](https://github.com/sql-js/sql.js) — `sql-wasm.js` + `sql-wasm.wasm` + `sqljs.esm.js` ESM facade | 1.14.1 | MIT | `https://cdn.jsdelivr.net/npm/sql.js@1.14.1/dist/` |
-| `mathjax/` | [MathJax](https://github.com/mathjax/MathJax) — `tex-mml-chtml.js` + `output/chtml/fonts/woff-v2` | 3.2.2 | Apache-2.0 | `https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/` |
+| `mathjax/` | [MathJax](https://github.com/mathjax/MathJax) — `tex-mml-chtml.js`; fonts from `@mathjax/mathjax-newcm-font` in `output/chtml/fonts/woff2` (v4 needed: 3.2's es5 build ships without the linebreaking engine) | 4.1.3 | Apache-2.0 | `https://cdn.jsdelivr.net/npm/mathjax@4.1.3/tex-mml-chtml.js` |
 
 To upgrade: download the new `+esm` build over the file and bump the version
 here, then run `npm test`.
