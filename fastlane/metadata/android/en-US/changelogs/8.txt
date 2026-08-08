@@ -1,0 +1,1 @@
+Fixed review-page scrolling glitches (no more jumpy autoscroll or zoom-on-focus), LaTeX now line-breaks properly, and added fonts so growing pages don't shift. iOS build support landed too.
