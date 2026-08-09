@@ -13,6 +13,9 @@ node_modules/
 .DS_Store
 dist/
 tmp/
+# Prebuilt binary from the pinned npm sql.js package — restored by postinstall
+# (scripts/copy-sqljs-wasm.js), never committed (F-Droid scans for blobs).
+vendor/sqljs/sql-wasm.wasm
 ios/
 web/.file-server-state.json
 __pycache__/
