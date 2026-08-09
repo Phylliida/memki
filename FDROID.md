@@ -42,7 +42,9 @@ Per https://f-droid.org/en/docs/Inclusion_Policy/ :
   WebView asset loader (no sockets), save-folder access goes through SAF —
   so we deleted it. The APK now has zero `<uses-permission>` entries, which
   makes the "no network access" store claim literally true.
-- **No binary blobs in git**: untracked the committed `oss-anki.apk`.
+- **No binary blobs in git**: untracked the committed `oss-anki.apk`, and
+  `vendor/sqljs/sql-wasm.wasm` isn't in git either (postinstall restores it
+  from the pinned npm sql.js package — see pitfall #3).
   `.gitignore` also blocks `*.keystore` (with an explicit exception for the
   committed *debug* keystore, which is public by design).
 - **Track Capacitor's generated cordova gradle files** — see pitfall #2.
@@ -85,48 +87,55 @@ Repo: https://github.com/Phylliida/memki
 Binaries: https://github.com/Phylliida/memki/releases/download/v%v/memki-%v.apk
 
 Builds:
-  - versionName: 1.0.6
-    versionCode: 7
-    commit: 232103f9a67ca945bd9b1ba6c6e31b2d741747d4
-    subdir: android
+  - versionName: 1.0.7
+    versionCode: 8
+    commit: 6c4e281de79f07edc34714e7d813d9a41e23cba4
+    subdir: android/app
     sudo:
       - echo "deb https://deb.debian.org/debian forky main" > /etc/apt/sources.list.d/forky.list
       - apt-get update
-      - DEBIAN_FRONTEND=noninteractive apt-get install -y -t forky nodejs npm
+      - apt-get install -y -t forky nodejs npm
     gradle:
       - yes
-    output: app/build/outputs/apk/release/app-release-unsigned.apk
-    scanignore:
-      - vendor/sqljs/sql-wasm.wasm
     build:
-      - cd ..
+      - cd ../..
       - npm ci
       - bash scripts/build-capacitor.sh
       - npx cap sync android
-      - cd android
 
 AllowedAPKSigningKeys: 437ac265133b4633ba12bd3c889b04f8597911e99482078bf09a5d65326cc3ae
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 1.0.6
-CurrentVersionCode: 7
+CurrentVersion: 1.0.7
+CurrentVersionCode: 8
 ```
 
 Field notes (each of these cost us something to learn):
 
 - **`commit:`**: full hash, not a tag name (fdroid's docs ask for hashes).
-- **`subdir: android`** + every script phase (`init`/`prebuild`/`build`)
-  **runs in the subdir** — hence `cd ..` first and `cd android` last.
+- **`subdir: android/app`** — the directory Gradle generates its `build/`
+  output in (linsui's review: "the subdir should be set to the path where
+  the build directory will be generated in"). Every script phase
+  (`init`/`prebuild`/`build`) **runs in the subdir**, hence `cd ../..` first
+  to reach the repo root for `npm ci`/`cap sync`. Gradle run in `android/app`
+  discovers the multi-project build via the parent `settings.gradle` and
+  builds just the `:app` subproject.
+- **No `output:`** — with subdir on the app module, fdroid auto-finds the
+  APK in `<subdir>/build/outputs/apk/release/`. Setting `output:` switches
+  the output method to `raw` and bypasses that auto-detection, so reviewers
+  ask for it to be dropped.
 - **`build:` runs after the source scan; `init`/`prebuild` run before it.**
   `npm ci` creates `node_modules` full of blobs, so it must be in `build:`,
-  not earlier.
+  not earlier. (`scanignore`/`scandelete` paths are relative to the repo
+  root, not the subdir.)
 - **`sudo:`**: the buildserver is Debian; current fdroiddata convention pulls
   `nodejs`/`npm` from the `forky` suite (newer than the base image's).
-- **`scanignore: vendor/sqljs/sql-wasm.wasm`**: the scanner rejects prebuilt
-  binaries; the wasm is compiled from public-domain SQLite and rebuilding it
-  needs an emscripten toolchain. Justify it in the MR description (comments
-  in the file itself are stripped by rewritemeta).
+- **Prebuilt binaries**: keep none in git. `vendor/sqljs/sql-wasm.wasm`
+  (compiled SQLite, needed at runtime for .apkg interop) is restored from
+  the lockfile-pinned npm sql.js package by an npm `postinstall` script —
+  the source scan runs before `npm ci`, so the scanner never sees it, and
+  both our CI and the buildserver get byte-identical bytes (RB unaffected).
 - **`Binaries:`** turns on reproducible builds. `%v` expands to versionName.
   Lint then **requires `AllowedAPKSigningKeys`** (SHA-256 fingerprint of the
   release cert, lowercase hex, no colons) so the signature is pinned.
@@ -232,7 +241,10 @@ successfully` + `allowed signer <fingerprint>`.
    *configuration* time, before any `npm ci`/`cap sync` can regenerate it.
    Fix: track those generated files (static with zero cordova plugins).
 3. **Source scanner rejected `vendor/sqljs/sql-wasm.wasm`** (prebuilt
-   binary). Fix: `scanignore` entry + justification in the MR text.
+   binary). First fix was a `scanignore` entry, but reviewers asked for it
+   gone — final fix: the wasm is no longer in git at all; npm `postinstall`
+   (`scripts/copy-sqljs-wasm.js`) copies it from the lockfile-pinned sql.js
+   package after the scan has already run.
 4. **Tag pushes never triggered the release workflow** — both
    `on: push: tags:` and `on: create:` events from this repo's pushes don't
    reach Actions (only branch pushes do; likely the pushing credential type

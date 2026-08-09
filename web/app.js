@@ -3581,11 +3581,13 @@ function wireKeyboard() {
       e.preventDefault(); doUndo(); return;
     }
     if (!state.card) return; // grading shortcuts only while a card is being studied
-    const inField = e.target?.matches?.("input, textarea, select");
+    // Fields include contenteditable (mdEditor) — mid-study note edits must not
+    // trigger flip/grade shortcuts.
+    const inField = e.target?.isContentEditable || e.target?.matches?.("input, textarea, select");
+    if (inField) return;
     if (!state.answerShown) {
-      if (e.key === "Enter") { e.preventDefault(); showAnswer(); }
-      else if (e.key === " " && !inField) { e.preventDefault(); showAnswer(); }
-    } else if (!inField && GRADE[e.key]) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showAnswer(); }
+    } else if (GRADE[e.key]) {
       e.preventDefault();
       gradeCard(GRADE[e.key]);
     }
