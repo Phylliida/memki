@@ -1,0 +1,1 @@
+No user-facing changes — build system now compiles the bundled SQLite (sql.js) from source, as required for F-Droid inclusion.
