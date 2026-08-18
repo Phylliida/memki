@@ -37,7 +37,7 @@ jobs:
     # `create` fires for branches too — only tags may build a release.
     if: github.event_name != 'create' || github.event.ref_type == 'tag'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
 
     steps:
       - name: Checkout
@@ -78,6 +78,23 @@ jobs:
       - name: Install JS deps
         if: steps.gate.outputs.skip == 'false'
         run: npm ci
+
+      # F-Droid's scanner rejects the prebuilt sql-wasm.wasm shipped by the
+      # npm sql.js package, so the F-Droid recipe compiles sql.js from source
+      # with the buildserver's emscripten (Debian trixie). Do the identical
+      # build here — in a trixie container, so the toolchain matches — or the
+      # wasm bytes differ and reproducible-builds verification fails.
+      - name: Build sql.js from source (Debian trixie, matches F-Droid)
+        if: steps.gate.outputs.skip == 'false'
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" -w /src debian:trixie \
+            bash -c 'set -euo pipefail
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq
+              apt-get install -y -qq --no-install-recommends \
+                emscripten make curl unzip libdigest-sha3-perl git ca-certificates nodejs
+              bash scripts/build-sqljs-from-source.sh
+              chown -R --reference=package.json vendor'
 
       - name: Build Capacitor webDir
         if: steps.gate.outputs.skip == 'false'

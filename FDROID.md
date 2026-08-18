@@ -95,13 +95,19 @@ Builds:
       - echo "deb https://deb.debian.org/debian forky main" > /etc/apt/sources.list.d/forky.list
       - apt-get update
       - apt-get install -y -t forky nodejs npm
+      - apt-get install -y emscripten make curl unzip libdigest-sha3-perl git
     gradle:
       - yes
-    build:
+    prebuild:
       - cd ../..
-      - npm ci
+      - npm ci --ignore-scripts
       - bash scripts/build-capacitor.sh
       - npx cap sync android
+      - rm -rf node_modules/sql.js
+      - rm -f node_modules/@capacitor/cli/assets/*.tar.gz
+    build:
+      - cd ../..
+      - bash scripts/build-sqljs-from-source.sh
 
 AllowedAPKSigningKeys: 437ac265133b4633ba12bd3c889b04f8597911e99482078bf09a5d65326cc3ae
 
@@ -125,17 +131,27 @@ Field notes (each of these cost us something to learn):
   APK in `<subdir>/build/outputs/apk/release/`. Setting `output:` switches
   the output method to `raw` and bypasses that auto-detection, so reviewers
   ask for it to be dropped.
-- **`build:` runs after the source scan; `init`/`prebuild` run before it.**
-  `npm ci` creates `node_modules` full of blobs, so it must be in `build:`,
-  not earlier. (`scanignore`/`scandelete` paths are relative to the repo
-  root, not the subdir.)
+- **`prebuild:` runs BEFORE the source scan; `build:` runs after it.**
+  The scanner flags binary blobs by file type (wasm, tar.gz, jars)
+  regardless of provenance — even a wasm you just compiled yourself fails
+  the scan if it exists at scan time. So: `prebuild` (npm ci, cap sync)
+  must leave the tree blob-free, and anything producing binaries belongs in
+  `build:`. Concretely: `npm ci --ignore-scripts` skips the postinstall
+  that restores npm's prebuilt wasm into `vendor/`; the `rm`'s drop the
+  wasm inside `node_modules/sql.js` and the `cap add` template tarballs in
+  `@capacitor/cli` (unused after sync). (`scanignore`/`scandelete` paths
+  are relative to the repo root, not the subdir.)
 - **`sudo:`**: the buildserver is Debian; current fdroiddata convention pulls
   `nodejs`/`npm` from the `forky` suite (newer than the base image's).
-- **Prebuilt binaries**: keep none in git. `vendor/sqljs/sql-wasm.wasm`
-  (compiled SQLite, needed at runtime for .apkg interop) is restored from
-  the lockfile-pinned npm sql.js package by an npm `postinstall` script —
-  the source scan runs before `npm ci`, so the scanner never sees it, and
-  both our CI and the buildserver get byte-identical bytes (RB unaffected).
+  `emscripten` + `make`/`curl`/`unzip`/`libdigest-sha3-perl` (sha3sum) are
+  the sql.js from-source build toolchain — trixie's emscripten 3.1.69.
+- **Prebuilt binaries**: keep none in git AND none in the tree at scan time.
+  `vendor/sqljs/sql-wasm.wasm` (compiled SQLite, needed at runtime for .apkg
+  interop) is not in git; local dev restores the npm package's prebuilt wasm
+  via npm `postinstall`, but release builds compile sql.js from source —
+  `build:` runs `scripts/build-sqljs-from-source.sh` (see pitfall #9), which
+  installs the fresh wasm over `vendor/` + `dist/` + the synced android
+  assets before gradle packages them.
 - **`Binaries:`** turns on reproducible builds. `%v` expands to versionName.
   Lint then **requires `AllowedAPKSigningKeys`** (SHA-256 fingerprint of the
   release cert, lowercase hex, no colons) so the signature is pinned.
@@ -242,9 +258,10 @@ successfully` + `allowed signer <fingerprint>`.
    Fix: track those generated files (static with zero cordova plugins).
 3. **Source scanner rejected `vendor/sqljs/sql-wasm.wasm`** (prebuilt
    binary). First fix was a `scanignore` entry, but reviewers asked for it
-   gone — final fix: the wasm is no longer in git at all; npm `postinstall`
+   gone — second fix: the wasm is no longer in git at all; npm `postinstall`
    (`scripts/copy-sqljs-wasm.js`) copies it from the lockfile-pinned sql.js
-   package after the scan has already run.
+   package after the scan has already run. That held only while `npm ci`
+   stayed in `build:` — see #9 for the final form.
 4. **Tag pushes never triggered the release workflow** — both
    `on: push: tags:` and `on: create:` events from this repo's pushes don't
    reach Actions (only branch pushes do; likely the pushing credential type
@@ -272,6 +289,23 @@ successfully` + `allowed signer <fingerprint>`.
    D8/baseline-profile output differs across JDK majors. Fix: build the
    release with JDK 21. Verified: nix openjdk-21, Debian openjdk-21
    (buildserver), and temurin-21 (GitHub) all produce byte-identical APKs.
+9. **Reviewer moved `npm ci` from `build:` to `prebuild:`** (linsui, via a
+   GitLab suggestion), so the scan — which runs after prebuild — saw
+   `node_modules` and the postinstall-restored wasm: 12 errors (6 wasm + 5
+   `@capacitor/cli` tar.gz templates) and the job died with "Can't build due
+   to 12 errors while scanning". Key realizations: the scanner flags blobs by
+   file type regardless of provenance (a self-compiled wasm fails too), and
+   hiding npm's prebuilt wasm past the scan was never policy-clean anyway —
+   F-Droid ships no prebuilt binaries. Final fix: `prebuild` uses
+   `npm ci --ignore-scripts` and deletes the blob paths, and a new `build:`
+   phase compiles sql.js from source with the buildserver's emscripten
+   (`scripts/build-sqljs-from-source.sh`, run after the scan, before gradle).
+   RB parity: the GitHub release workflow runs the same script in a
+   `debian:trixie` container so both APKs carry byte-identical wasm — the
+   emscripten version must match (trixie's 3.1.69), so NO emsdk/latest.
+   `--closure 1` is dropped from sql.js's optimized flags: it only minifies
+   the JS wrapper, and Closure availability differs across images, which
+   would be an RB hazard.
 
 Diagnosis technique that mattered: download fdroid CI's **job artifacts**
 (public even when job traces are 401) to get their unsigned APK, then
