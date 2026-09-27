@@ -92,10 +92,11 @@ Builds:
     commit: 6c4e281de79f07edc34714e7d813d9a41e23cba4
     subdir: android/app
     sudo:
+      - apt-get update
+      - apt-get install -y emscripten make curl unzip libdigest-sha3-perl git
       - echo "deb https://deb.debian.org/debian forky main" > /etc/apt/sources.list.d/forky.list
       - apt-get update
       - apt-get install -y -t forky nodejs npm
-      - apt-get install -y emscripten make curl unzip libdigest-sha3-perl git
     gradle:
       - yes
     prebuild:
@@ -305,7 +306,13 @@ successfully` + `allowed signer <fingerprint>`.
    emscripten version must match (trixie's 3.1.69), so NO emsdk/latest.
    `--closure 1` is dropped from sql.js's optimized flags: it only minifies
    the JS wrapper, and Closure availability differs across images, which
-   would be an RB hazard.
+   would be an RB hazard. Follow-up: the first from-source run failed at the
+   wasm link (`wasm-ld-21: undefined symbol: __cxa_increment_exception_refcount`)
+   because the forky apt source was added before `apt-get install emscripten`,
+   so apt pulled forky's emscripten 6.0.5 + LLVM 21 instead of trixie's
+   3.1.69 + clang-19. Fix: install emscripten BEFORE the forky line in
+   `sudo:` — also an RB requirement, since the GitHub release builds with
+   pure-trixie packages and the wasm bytes must match.
 
 Diagnosis technique that mattered: download fdroid CI's **job artifacts**
 (public even when job traces are 401) to get their unsigned APK, then
